@@ -3,19 +3,20 @@ package com.yivi.perception
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,18 +31,18 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.yivi.perception.ui.AppBackground
 import com.yivi.perception.ui.home.HomeScreen
 import com.yivi.perception.ui.settings.SettingsScreen
-import com.yivi.perception.ui.theme.DeepBg
-import com.yivi.perception.ui.theme.TextPrimary
-import com.yivi.perception.ui.theme.TextSecondary
+import com.yivi.perception.ui.theme.LocalPalette
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             com.yivi.perception.ui.theme.PerceptionTheme {
-                MainScreen()
+                AppBackground { MainScreen() }
             }
         }
     }
@@ -56,7 +57,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 private fun MainScreen() {
     var selected by rememberSaveable { mutableIntStateOf(0) }
 
-    Box(modifier = Modifier.fillMaxSize().background(DeepBg)) {
+    Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
         when (Tab.entries[selected]) {
             Tab.Calendar -> HomeScreen()
             Tab.Settings -> SettingsScreen()
@@ -66,20 +67,21 @@ private fun MainScreen() {
             onSelect = { selected = it },
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 18.dp, bottom = 18.dp)
+                .padding(start = 18.dp, bottom = 20.dp)
         )
     }
 }
 
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val palette = LocalPalette.current
     Row(
         modifier = modifier
             .fillMaxWidth(0.42f)
             .height(58.dp)
             .background(
                 brush = Brush.verticalGradient(
-                    listOf(Color(0xFF332844).copy(alpha = 0.72f), Color(0xFF221A2B).copy(alpha = 0.86f))
+                    listOf(palette.cardViolet.copy(alpha = 0.75f), palette.cardBottom.copy(alpha = 0.9f))
                 ),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
             )
@@ -94,7 +96,7 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier
                     .weight(1f)
                     .height(46.dp)
                     .background(
-                        if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.24f) else Color.Transparent,
+                        if (active) palette.accent.copy(alpha = 0.25f) else Color.Transparent,
                         androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
                     ),
                 contentAlignment = Alignment.Center
@@ -102,10 +104,15 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier
                 Icon(
                     imageVector = tab.icon,
                     contentDescription = tab.label,
-                    tint = if (active) MaterialTheme.colorScheme.primary else TextSecondary,
+                    tint = if (active) palette.accent else palette.textSecondary,
                     modifier = Modifier.height(22.dp)
                 )
-                Text(tab.label, fontSize = 10.sp, color = if (active) TextPrimary else TextSecondary)
+                Text(
+                    tab.label,
+                    fontSize = 10.sp,
+                    color = if (active) palette.textPrimary else palette.textSecondary,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }

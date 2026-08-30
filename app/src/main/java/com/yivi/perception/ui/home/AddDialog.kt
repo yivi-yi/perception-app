@@ -41,11 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yivi.perception.data.db.EventEntity
-import com.yivi.perception.ui.theme.AccentPink
-import com.yivi.perception.ui.theme.CardBg
-import com.yivi.perception.ui.theme.CardViolet
-import com.yivi.perception.ui.theme.TextPrimary
-import com.yivi.perception.ui.theme.TextSecondary
+import com.yivi.perception.ui.theme.LocalPalette
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -56,7 +52,8 @@ private val dayFmt = DateTimeFormatter.ofPattern("yyyy年M月d日")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddDialog(initialCategory: String, onDismiss: () -> Unit, onAdd: (EventEntity) -> Unit) {
+fun AddDialog(initialCategory: String, initialDate: Long, onDismiss: () -> Unit, onAdd: (EventEntity) -> Unit) {
+    val palette = LocalPalette.current
     var cat by remember { mutableStateOf(initialCategory) }
     var title by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
@@ -64,7 +61,7 @@ fun AddDialog(initialCategory: String, onDismiss: () -> Unit, onAdd: (EventEntit
     var duration by remember { mutableStateOf("5") }
     var repeat by remember { mutableStateOf(false) }
     var days by remember { mutableStateOf(setOf<Int>()) }
-    var dateMillis by remember { mutableStateOf(LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()) }
+    var dateMillis by remember { mutableStateOf(LocalDate.ofEpochDay(initialDate).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()) }
     var hour by remember { mutableStateOf(9) }
     var minute by remember { mutableStateOf(0) }
 
@@ -75,7 +72,7 @@ fun AddDialog(initialCategory: String, onDismiss: () -> Unit, onAdd: (EventEntit
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = CardBg,
+        containerColor = palette.cardBottom,
         shape = RoundedCornerShape(28.dp),
         title = {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -94,17 +91,17 @@ fun AddDialog(initialCategory: String, onDismiss: () -> Unit, onAdd: (EventEntit
 
                 if (cat == "行程") {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("提醒（状态栏弹窗）", color = TextSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        Switch(checked = remind, onCheckedChange = { remind = it }, colors = SwitchDefaults.colors(checkedTrackColor = AccentPink))
+                        Text("提醒（状态栏弹窗）", color = palette.textSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Switch(checked = remind, onCheckedChange = { remind = it }, colors = SwitchDefaults.colors(checkedTrackColor = palette.accent))
                     }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("闹钟时长（分钟）", color = TextSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Text("闹钟时长（分钟）", color = palette.textSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
                         OutlinedTextField(value = duration, onValueChange = { duration = it.filter { c -> c.isDigit() } }, singleLine = true, modifier = Modifier.width(70.dp))
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("每周重复", color = TextSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        Switch(checked = repeat, onCheckedChange = { repeat = it }, colors = SwitchDefaults.colors(checkedTrackColor = AccentPink))
+                        Text("每周重复", color = palette.textSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Switch(checked = repeat, onCheckedChange = { repeat = it }, colors = SwitchDefaults.colors(checkedTrackColor = palette.accent))
                     }
                     if (repeat) {
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
@@ -114,11 +111,11 @@ fun AddDialog(initialCategory: String, onDismiss: () -> Unit, onAdd: (EventEntit
                                     modifier = Modifier
                                         .size(34.dp)
                                         .clip(CircleShape)
-                                        .background(if (on) AccentPink else Color.Transparent)
+                                        .background(if (on) palette.accent else Color.Transparent)
                                         .clickable { days = if (on) days - d else days + d },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(l, color = if (on) Color.Black else TextSecondary, fontSize = 13.sp)
+                                    Text(l, color = if (on) palette.bgBottom else palette.textSecondary, fontSize = 13.sp)
                                 }
                             }
                         }
@@ -134,28 +131,30 @@ fun AddDialog(initialCategory: String, onDismiss: () -> Unit, onAdd: (EventEntit
                     onAdd(EventEntity(category = "闹钟", title = title.ifBlank { "无标题" }, note = note, time = timeMillis, repeatDays = if (repeat) days.sorted().joinToString(",") else ""))
                 }
                 onDismiss()
-            }) { Text("保存", color = AccentPink) }
+            }) { Text("保存", color = palette.accent) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消", color = TextSecondary) } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消", color = palette.textSecondary) } }
     )
 }
 
 @Composable
 private fun TabBtn(label: String, active: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(if (active) AccentPink.copy(alpha = 0.25f) else Color.Transparent)
+            .background(if (active) palette.accent.copy(alpha = 0.25f) else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-        Text(label, color = if (active) AccentPink else TextSecondary, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+        Text(label, color = if (active) palette.accent else palette.textSecondary, fontWeight = FontWeight.Medium, fontSize = 15.sp)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DateTimeSelect(dateMillis: Long, hour: Int, minute: Int, onChangeDate: (Long) -> Unit, onChangeTime: (Int, Int) -> Unit) {
+    val palette = LocalPalette.current
     var showDate by remember { mutableStateOf(false) }
     var showTime by remember { mutableStateOf(false) }
     val dateText = Instant.ofEpochMilli(dateMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(dayFmt)
@@ -165,21 +164,21 @@ private fun DateTimeSelect(dateMillis: Long, hour: Int, minute: Int, onChangeDat
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .clip(RoundedCornerShape(12.dp))
-                .background(CardViolet.copy(alpha = 0.5f))
+                .background(palette.cardViolet.copy(alpha = 0.5f))
                 .clickable { showDate = true }
                 .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
-            Text("📅 $dateText", color = TextPrimary, fontSize = 13.sp)
+            Text("📅 $dateText", color = palette.textPrimary, fontSize = 13.sp)
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .clip(RoundedCornerShape(12.dp))
-                .background(CardViolet.copy(alpha = 0.5f))
+                .background(palette.cardViolet.copy(alpha = 0.5f))
                 .clickable { showTime = true }
                 .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
-            Text("⏰ %02d:%02d".format(hour, minute), color = TextPrimary, fontSize = 13.sp)
+            Text("⏰ %02d:%02d".format(hour, minute), color = palette.textPrimary, fontSize = 13.sp)
         }
     }
 
@@ -187,8 +186,8 @@ private fun DateTimeSelect(dateMillis: Long, hour: Int, minute: Int, onChangeDat
         val state = rememberDatePickerState(initialSelectedDateMillis = dateMillis)
         DatePickerDialog(
             onDismissRequest = { showDate = false },
-            confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { onChangeDate(it) }; showDate = false }) { Text("确定", color = AccentPink) } },
-            dismissButton = { TextButton(onClick = { showDate = false }) { Text("取消", color = TextSecondary) } }
+            confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { onChangeDate(it) }; showDate = false }) { Text("确定", color = palette.accent) } },
+            dismissButton = { TextButton(onClick = { showDate = false }) { Text("取消", color = palette.textSecondary) } }
         ) {
             DatePicker(state = state)
         }
@@ -198,9 +197,9 @@ private fun DateTimeSelect(dateMillis: Long, hour: Int, minute: Int, onChangeDat
         val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = true)
         AlertDialog(
             onDismissRequest = { showTime = false },
-            containerColor = CardBg,
-            confirmButton = { TextButton(onClick = { onChangeTime(state.hour, state.minute); showTime = false }) { Text("确定", color = AccentPink) } },
-            dismissButton = { TextButton(onClick = { showTime = false }) { Text("取消", color = TextSecondary) } },
+            containerColor = palette.cardBottom,
+            confirmButton = { TextButton(onClick = { onChangeTime(state.hour, state.minute); showTime = false }) { Text("确定", color = palette.accent) } },
+            dismissButton = { TextButton(onClick = { showTime = false }) { Text("取消", color = palette.textSecondary) } },
             text = { TimePicker(state = state) }
         )
     }

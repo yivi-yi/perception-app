@@ -14,7 +14,7 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.booleanOrNull
 
-class McpEngine(private val toolkit: NativeToolkit) {
+class McpEngine(private val toolkit: NativeToolkit, private val settings: com.yivi.perception.data.SettingsRepository) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -89,6 +89,7 @@ class McpEngine(private val toolkit: NativeToolkit) {
     }
 
     private suspend fun callTool(name: String, args: JsonObject): String {
+        settings.addLog("调用工具 $name")
         val s = { k: String -> args[k]?.jsonPrimitive?.contentOrNull }
         val l = { k: String -> args[k]?.jsonPrimitive?.longOrNull }
         val b = { k: String -> args[k]?.jsonPrimitive?.booleanOrNull }

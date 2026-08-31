@@ -1,13 +1,12 @@
 package com.yivi.perception.mcp
 
 import io.ktor.http.ContentType
+import io.ktor.server.application.*
 import io.ktor.server.cio.CIO
-import io.ktor.server.engine.embeddedServer
+import io.ktor.server.engine.*
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
-import io.ktor.server.routing.get
-import io.ktor.server.routing.post
-import io.ktor.server.routing.routing
+import io.ktor.server.routing.*
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -18,7 +17,7 @@ import kotlinx.serialization.json.jsonObject
 
 class HttpMcpServer(private val engine: McpEngine) {
     private val json = Json { ignoreUnknownKeys = true }
-    private var server: Any? = null
+    private var server: EmbeddedServer<*, *, *>? = null
 
     @OptIn(DelicateCoroutinesApi::class)
     fun start(port: Int, onReady: (Int) -> Unit) {
@@ -53,7 +52,7 @@ class HttpMcpServer(private val engine: McpEngine) {
     }
 
     fun stop() {
-        (server as? io.ktor.server.engine.EmbeddedServer<*, *, *>)?.stop(1000, 1000)
+        server?.stop(1000, 1000)
         server = null
     }
 }

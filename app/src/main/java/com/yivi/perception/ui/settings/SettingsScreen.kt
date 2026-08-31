@@ -1,12 +1,16 @@
 package com.yivi.perception.ui.settings
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -25,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -36,6 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,10 +55,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.yivi.perception.PerceptionApp
 import com.yivi.perception.data.ToolCatalog
 import com.yivi.perception.service.NetworkUtils
@@ -90,6 +100,20 @@ fun SettingsScreen() {
         val intent = Intent(context, ServerService::class.java).apply { action = ServerService.ACTION_STOP }
         context.startService(intent)
         running = false
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val accEnabled = remember { mutableStateOf(isAccessibilityEnabled(context)) }
+    val notifEnabled = remember { mutableStateOf(isNotifEnabled(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) {
+                accEnabled.value = isAccessibilityEnabled(context)
+                notifEnabled.value = isNotifEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
     val lanIp = NetworkUtils.localIp()
@@ -144,6 +168,7 @@ fun SettingsScreen() {
                 }
             }
 
+            // 工具盒
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -160,6 +185,14 @@ fun SettingsScreen() {
                     Spacer(Modifier.weight(1f))
                     Text("${ToolCatalog.tools.size} 个工具", color = palette.textSecondary, fontSize = 12.sp)
                 }
+            }
+
+            PanelCard {
+                Text("系统权限", color = palette.textSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                PermissionRow("无障碍", accEnabled.value) { openAccessibility(context) }
+                PermissionRow("通知监听", notifEnabled.value) { openNotificationAccess(context) }
+                Text("· 应用时间线：系统设置 → 特殊应用权限 → 使用情况访问权限", color = palette.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
 
             PanelCard {
@@ -182,6 +215,7 @@ fun SettingsScreen() {
             }
         }
 
+        // 右下角正方形启动键
         StartButton(
             running = running,
             onClick = { if (running) stopServer() else startServer() },
@@ -305,6 +339,46 @@ private fun StartButton(running: Boolean, onClick: () -> Unit, modifier: Modifie
             modifier = Modifier.size(30.dp)
         )
     }
+}
+
+@Composable
+private fun PermissionRow(label: String, enabled: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp)
+    ) {
+        Text(label, color = palette.textPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Box(
+            modifier = Modifier
+                .size(18.dp)
+                .clip(CircleShape)
+                .background(if (enabled) palette.accent else palette.cardViolet.copy(alpha = 0.6f))
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(if (enabled) "已开启" else "去开启", color = if (enabled) palette.accent else palette.textSecondary, fontSize = 12.sp)
+    }
+}
+
+private fun isAccessibilityEnabled(context: Context): Boolean {
+    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
+    val services = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+    return services.any { it.resolveInfo.serviceInfo.packageName == context.packageName }
+}
+
+private fun isNotifEnabled(context: Context): Boolean =
+    NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+
+private fun openAccessibility(context: Context) {
+    try {
+        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (e: Exception) { }
+}
+
+private fun openNotificationAccess(context: Context) {
+    try {
+        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (e: Exception) { }
 }
 
 private fun loadBg(context: android.content.Context, uri: Uri): Bitmap? {

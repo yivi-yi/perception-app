@@ -1,58 +1,60 @@
 package com.yivi.perception.mcp
 
-import io.ktor.http.ContentType
-import io.ktor.server.application.*
-import io.ktor.server.cio.CIO
-import io.ktor.server.engine.*
-import io.ktor.server.request.receiveText
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.*
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
+import fi.iki.elonen.NanoHTTPD
+import fi.iki.elonen.NanoHTTPD.IHTTPSession
+import fi.iki.elonen.NanoHTTPD.Response
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 
 class HttpMcpServer(private val engine: McpEngine) {
     private val json = Json { ignoreUnknownKeys = true }
-    private var server: EmbeddedServer<*, *, *>? = null
+    private var httpd: NanoHTTPD? = null
 
-    @OptIn(DelicateCoroutinesApi::class)
     fun start(port: Int, onReady: (Int) -> Unit) {
-        if (server != null) return
-        GlobalScope.launch {
-            val s = embeddedServer(CIO, host = "0.0.0.0", port = port) {
-                routing {
-                    get("/health") { call.respondText("ok") }
-                    get("/status") {
-                        call.respondText(
-                            json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(),
-                                buildJsonObject {
-                                    put("name", JsonPrimitive("Perception"))
-                                    put("running", JsonPrimitive(true))
-                                    put("port", JsonPrimitive(port))
-                                }), ContentType.Application.Json)
+        if (httpd != null) return
+        val s = object : NanoHTTPD(port) {
+            override fun serve(session: IHTTPSession): Response {
+                val path = session.uri
+                return when {
+                    path == "/health" -> newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
+                    path == "/status" -> newFixedLengthResponse(
+                        Response.Status.OK, "application/json",
+                        json.encodeToString(JsonElement.serializer(), buildJsonObject {
+                            put("name", JsonPrimitive("Perception"))
+                            put("running", JsonPrimitive(true))
+                            put("port", JsonPrimitive(port))
+                        })
+                    )
+                    path == "/mcp" -> {
+                        val req = try { json.parseToJsonElement(readBody(session)).jsonObject } catch (e: Exception) { JsonObject(emptyMap()) }
+                        val resp = runBlocking { engine.handle(req) }
+                        newFixedLengthResponse(Response.Status.OK, "application/json",
+                            json.encodeToString(JsonElement.serializer(), resp))
                     }
-                    post("/mcp") {
-                        val body = call.receiveText()
-                        val req = json.parseToJsonElement(body).jsonObject
-                        val resp = engine.handle(req)
-                        call.respondText(
-                            json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), resp),
-                            ContentType.Application.Json)
-                    }
+                    else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "not found")
                 }
             }
-            s.start(wait = false)
-            server = s
-            onReady(port)
         }
+        try {
+            s.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            httpd = s
+            onReady(port)
+        } catch (e: Exception) { }
     }
 
     fun stop() {
-        server?.stop(1000, 1000)
-        server = null
+        httpd?.stop()
+        httpd = null
+    }
+
+    private fun readBody(session: IHTTPSession): String {
+        return try {
+            session.inputStream?.bufferedReader()?.readText() ?: ""
+        } catch (e: Exception) { "" }
     }
 }

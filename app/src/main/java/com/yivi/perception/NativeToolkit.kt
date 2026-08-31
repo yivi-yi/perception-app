@@ -27,8 +27,10 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
     suspend fun battery(): Map<String, Any> = withContext(Dispatchers.IO) {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val charging = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGING_COUNTER)
-        mapOf("level" to level, "charging" to (charging != 0))
+        val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        mapOf("level" to level, "charging" to charging)
     }
 
     suspend fun storage(): Map<String, Any> = withContext(Dispatchers.IO) {

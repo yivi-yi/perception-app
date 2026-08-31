@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
@@ -45,7 +46,7 @@ fun AnnivEditDialog(initialText: String, initialType: String, initialDate: Long,
     var type by remember { mutableStateOf(initialType) }
     var dateMillis by remember { mutableStateOf(initialDate) }
     var showDate by remember { mutableStateOf(false) }
-    val dateText = if (dateMillis > 0) Instant.ofEpochMilli(dateMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(dFmt) else "请选择日期"
+    val dateText = Instant.ofEpochMilli(dateMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(dFmt)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -80,7 +81,7 @@ fun AnnivEditDialog(initialText: String, initialType: String, initialDate: Long,
     )
 
     if (showDate) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = if (dateMillis > 0) dateMillis else null)
+        val state = rememberDatePickerState(initialSelectedDateMillis = dateMillis)
         DatePickerDialog(
             onDismissRequest = { showDate = false },
             confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { dateMillis = it }; showDate = false }) { Text("确定", color = palette.accent) } },

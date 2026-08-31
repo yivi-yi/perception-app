@@ -39,11 +39,12 @@ class McpEngine(private val toolkit: NativeToolkit, private val settings: com.yi
     private fun tool(name: String, desc: String, props: List<String>): JsonObject {
         val schema = buildJsonObject {
             put("type", JsonPrimitive("object"))
-            val p = buildJsonObject {}
-            props.forEach {
-                p[it] = buildJsonObject {
-                    put("type", JsonPrimitive("string"))
-                    put("description", JsonPrimitive(""))
+            val p = buildJsonObject {
+                props.forEach {
+                    put(it, buildJsonObject {
+                        put("type", JsonPrimitive("string"))
+                        put("description", JsonPrimitive(""))
+                    })
                 }
             }
             put("properties", p)
@@ -114,7 +115,8 @@ class McpEngine(private val toolkit: NativeToolkit, private val settings: com.yi
         return json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), toJson(out))
     }
 
-    private fun toJson(m: Any): JsonElement = when (m) {
+    private fun toJson(m: Any?): JsonElement = when (m) {
+        null -> JsonNull
         is Map<*, *> -> buildJsonObject {
             m.forEach { (k, v) -> put(k.toString(), toJson(v)) }
         }
@@ -123,7 +125,7 @@ class McpEngine(private val toolkit: NativeToolkit, private val settings: com.yi
         is Int -> JsonPrimitive(m)
         is Long -> JsonPrimitive(m)
         is Double -> JsonPrimitive(m)
-        else -> JsonPrimitive(m?.toString() ?: "")
+        else -> JsonPrimitive(m.toString())
     }
 
     private fun result(id: JsonElement?, r: JsonObject): JsonObject = buildJsonObject {

@@ -60,7 +60,7 @@ class HttpMcpServer(private val engine: McpEngine) {
         if (httpd != null) return
         val server = object : NanoHTTPD(port) {
             override fun serve(session: IHTTPSession): Response {
-                val path = session.uri
+                val path = session.uri.trimEnd('/').ifBlank { "/" }
                 val isPost = session.method == Method.POST
                 val accept = session.headers["accept"]?.lowercase() ?: ""
                 val wantsSse = accept.contains("text/event-stream")
@@ -88,7 +88,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                         )
                     }
 
-                    (path == "/mcp" || path == "/") && isPost -> {
+                    isPost && path != "/health" && path != "/status" -> {
                         val raw = readBody(session)
                         val request = try {
                             json.parseToJsonElement(raw).jsonObject
@@ -121,6 +121,7 @@ class HttpMcpServer(private val engine: McpEngine) {
 
                             else -> {
                                 val method = engine.methodName(request)
+                                log("收到 $method（Accept: ${accept.ifBlank { "无" }} / UA: ${(session.headers["user-agent"] ?: "").take(40)}）")
                                 val resp = runBlocking {
                                     runCatching { engine.handle(request) }.getOrElse { e ->
                                         buildJsonObject {
@@ -148,6 +149,17 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 }
                             }
                         }
+                    }
+
+                    (path == "/mcp" || path == "/") && session.method == Method.GET -> {
+                        // 有些客户端会开一条 GET 的 SSE 流等服务器消息；我们不推消息，就发心跳挂着
+                        log("GET $path → 200 SSE 流（Accept: ${accept.ifBlank { "无" }}）")
+                        sseStream()
+                    }
+
+                    (path == "/mcp" || path == "/") && session.method == Method.DELETE -> {
+                        log("DELETE $path → 204（客户端结束了会话）")
+                        cors(newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", ""))
                     }
 
                     path == "/mcp" || path == "/" -> {
@@ -183,6 +195,32 @@ class HttpMcpServer(private val engine: McpEngine) {
         }
         httpd = null
         log("服务停了")
+    }
+
+    /** GET 上的 SSE 流：发心跳挂着，客户端断开就自己结束 */
+    private fun sseStream(): Response {
+        val out = java.io.PipedOutputStream()
+        val input = java.io.PipedInputStream(out, 8192)
+        val thread = Thread {
+            try {
+                out.write(": perception ready\n\n".toByteArray())
+                out.flush()
+                var beats = 0
+                while (beats < 40) {
+                    Thread.sleep(15000)
+                    out.write(": ping\n\n".toByteArray())
+                    out.flush()
+                    beats++
+                }
+            } catch (_: Exception) {
+                // 客户端走了
+            } finally {
+                runCatching { out.close() }
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+        return cors(newChunkedResponse(Response.Status.OK, "text/event-stream", input))
     }
 
     private fun cors(r: Response): Response {

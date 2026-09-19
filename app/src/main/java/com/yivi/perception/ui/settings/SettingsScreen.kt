@@ -653,20 +653,37 @@ private fun AddressRow(label: String, value: String, onCopy: (() -> Unit)? = nul
 
 /** 本机连自己一次：能分清是"服务没起来"还是"外面连不进来" */
 private fun selfTest(port: Int): String = try {
-    val conn = java.net.URL("http://127.0.0.1:$port/mcp").openConnection() as java.net.HttpURLConnection
-    conn.requestMethod = "POST"
-    conn.connectTimeout = 4000
-    conn.readTimeout = 8000
-    conn.doOutput = true
-    conn.setRequestProperty("Content-Type", "application/json")
-    conn.setRequestProperty("Accept", "application/json, text/event-stream")
-    val body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{" +
-        "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"selftest\",\"version\":\"1\"}}}"
-    conn.outputStream.use { it.write(body.toByteArray()) }
-    val code = conn.responseCode
-    val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-        ?.bufferedReader()?.use { it.readText() } ?: ""
-    "通了：HTTP $code · ${text.replace("\n", " ").take(90)}"
+    fun call(body: String): Pair<Int, String> {
+        val conn = java.net.URL("http://127.0.0.1:$port/mcp").openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.connectTimeout = 4000
+        conn.readTimeout = 10000
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.setRequestProperty("Accept", "application/json, text/event-stream")
+        conn.outputStream.use { it.write(body.toByteArray()) }
+        val code = conn.responseCode
+        val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader()?.use { it.readText() } ?: ""
+        return code to text
+    }
+
+    val init = call(
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{" +
+            "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"selftest\",\"version\":\"1\"}}}"
+    )
+    if (init.first !in 200..299) {
+        "没通：initialize 返回 HTTP ${init.first} · ${init.second.take(80)}"
+    } else {
+        val listed = call("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}")
+        val text = listed.second
+        val count = Regex("\"name\":").findAll(text).count()
+        if (listed.first in 200..299 && text.contains("\"tools\"")) {
+            "通了：initialize 200，tools/list 拿到 $count 个工具"
+        } else {
+            "initialize 通了，但 tools/list 不对劲：HTTP ${listed.first} · ${text.take(80)}"
+        }
+    }
 } catch (e: Exception) {
     "没通：${e.message ?: e.javaClass.simpleName}（服务没起？或者端口被占）"
 }

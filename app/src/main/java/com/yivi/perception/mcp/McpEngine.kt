@@ -64,10 +64,14 @@ class McpEngine(
         val params = request["params"] as? JsonObject ?: JsonObject(emptyMap())
 
         return when (method) {
-            "initialize" -> result(
+            "initialize" -> {
+                val want = params["protocolVersion"]?.jsonPrimitive?.contentOrNull
+                val known = setOf("2024-11-05", "2025-03-26", "2025-06-18")
+                val reply = if (want != null && want in known) want else "2025-06-18"
+                result(
                 id,
                 buildJsonObject {
-                    put("protocolVersion", JsonPrimitive("2024-11-05"))
+                    put("protocolVersion", JsonPrimitive(reply))
                     put("capabilities", buildJsonObject {
                         put("tools", buildJsonObject { put("listChanged", JsonPrimitive(false)) })
                     })
@@ -77,7 +81,8 @@ class McpEngine(
                     })
                     put("instructions", JsonPrimitive("手机上的日历、闹钟和一堆本机小工具。所有时间参数都是毫秒时间戳。工具出错时会返回 isError=true 和一句原因。"))
                 }
-            )
+                )
+            }
 
             "tools/list" -> result(id, buildJsonObject { put("tools", JsonArray(toolList())) })
 

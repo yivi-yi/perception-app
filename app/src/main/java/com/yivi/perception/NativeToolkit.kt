@@ -217,7 +217,8 @@ class NativeToolkit(
         val cur = root["current"]?.jsonObject
         val daily = root["daily"]?.jsonObject
 
-        val wantForecast = !(source ?: "").equals("current", ignoreCase = true)
+        // 默认只给当前天气；传 forecast 才带上未来三天
+        val wantForecast = (source ?: "").equals("forecast", ignoreCase = true)
         val days = mutableListOf<Map<String, Any>>()
         val dates = daily?.get("time")?.asArray()
         if (dates != null && wantForecast) {

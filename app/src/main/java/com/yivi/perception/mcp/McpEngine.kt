@@ -83,10 +83,17 @@ class McpEngine(
         tool("sensors", "这台手机上有哪些传感器（只是清单）。要读数用 read_sensor。"),
         tool(
             "read_sensor", "读一次传感器的当前值：光线强弱、距离、有没有在动、手机朝向、走了多少步。",
-            reqStr("kind", "light=光线 / proximity=距离 / motion=动静 / direction=朝向 / steps=步数 / all=全都要")
+            reqStr("kind", "light=光线 / proximity=距离 / motion=动静 / direction=朝向 / steps=步数 / pressure=气压 / humidity=湿度 / temperature=环境温度 / magnetic=磁场强度 / all=全都要")
         ),
         tool("open_app", "在这台手机上打开一个应用。", reqStr("packageName", "应用包名，如 com.tencent.mm；用 installed_apps 拿")),
         tool("installed_apps", "列出这台手机上已安装、能启动的应用（名字 + 包名）。"),
+        tool("sound_state", "看这台手机现在的铃声模式（响铃 / 震动 / 静音）、有没有开勿扰，以及媒体 / 铃声 / 通知 / 闹钟四路音量（百分比）。"),
+        tool(
+            "set_sound", "改这台手机的铃声模式或音量。",
+            str("mode", "normal=响铃 / vibrate=震动 / silent=静音 / dnd=开勿扰（勿扰要单独授权）"),
+            num("level", "音量百分比 0-100，配合 stream 用"),
+            str("stream", "改哪一路音量：music（默认）/ ring / notification / alarm")
+        ),
         // 手机状态
         tool("current_app", "这台手机现在前台是哪个应用，返回应用名和包名（要开无障碍权限）。"),
         tool(
@@ -214,6 +221,8 @@ class McpEngine(
             "network" -> toolkit.network()
             "sensors" -> toolkit.sensors()
             "read_sensor" -> toolkit.readSensor(s("kind") ?: "all")
+            "sound_state" -> toolkit.soundState()
+            "set_sound" -> toolkit.setSound(s("mode"), l("level")?.toInt(), s("stream"))
             "open_app" -> toolkit.openApp(s("packageName") ?: "")
             "installed_apps" -> toolkit.installedApps()
             "current_app" -> toolkit.currentApp()

@@ -107,6 +107,7 @@ fun SettingsScreen() {
     val bootStart by settings.bootStart.collectAsState()
     val scope = rememberCoroutineScope()
     var batteryOk by remember { mutableStateOf(isIgnoringBattery(context)) }
+    var dndOk by remember { mutableStateOf(isDndGranted(context)) }
     val versionName = remember { appVersion(context) }
 
     val notifPermission = if (Build.VERSION.SDK_INT >= 33) {
@@ -151,6 +152,7 @@ fun SettingsScreen() {
                 accEnabled.value = isAccessibilityEnabled(context)
                 notifEnabled.value = isNotifEnabled(context)
                 batteryOk = isIgnoringBattery(context)
+                dndOk = isDndGranted(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
@@ -324,6 +326,8 @@ fun SettingsScreen() {
                 PermissionRow("无障碍", accEnabled.value) { openAccessibility(context) }
                 ThinDivider()
                 PermissionRow("通知监听", notifEnabled.value) { openNotificationAccess(context) }
+                ThinDivider()
+                PermissionRow("勿扰权限（改勿扰用）", dndOk) { openDndAccess(context) }
                 Spacer(Modifier.height(4.dp))
                 Text("· 应用时间线：系统设置 → 特殊应用权限 → 使用情况访问", color = palette.textDim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
@@ -696,6 +700,21 @@ private fun openAccessibility(context: Context) {
     try {
         context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (e: Exception) { }
+}
+
+private fun isDndGranted(context: Context): Boolean {
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+    return nm?.isNotificationPolicyAccessGranted ?: false
+}
+
+private fun openDndAccess(context: Context) {
+    try {
+        context.startActivity(
+            Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (e: Exception) {
+    }
 }
 
 private fun openNotificationAccess(context: Context) {

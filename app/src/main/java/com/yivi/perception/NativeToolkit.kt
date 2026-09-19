@@ -374,6 +374,24 @@ class NativeToolkit(
                 }
             }
         }
+        if (kind == "all" || kind == "pressure") {
+            val v = readOnce(sm, Sensor.TYPE_PRESSURE)
+            if (v != null) out["pressure_hpa"] = v[0]
+        }
+        if (kind == "all" || kind == "humidity") {
+            val v = readOnce(sm, Sensor.TYPE_RELATIVE_HUMIDITY)
+            if (v != null) out["humidity_percent"] = v[0]
+        }
+        if (kind == "all" || kind == "temperature") {
+            val v = readOnce(sm, Sensor.TYPE_AMBIENT_TEMPERATURE)
+            if (v != null) out["temperature_c"] = v[0]
+        }
+        if (kind == "all" || kind == "magnetic") {
+            val v = readOnce(sm, Sensor.TYPE_MAGNETIC_FIELD)
+            if (v != null) {
+                out["magnetic_ut"] = kotlin.math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+            }
+        }
         if (kind == "all" || kind == "steps") {
             if (!hasPermission(Manifest.permission.ACTIVITY_RECOGNITION) && Build.VERSION.SDK_INT >= 29) {
                 out["steps"] = "没给活动识别权限，读不了步数"
@@ -530,7 +548,120 @@ class NativeToolkit(
         }
     }
 
-    // ── 点歌：查网易云 API 拿 id，再跳本机网易云 ────────────
+    // ── 音量 / 铃声模式 / 勿扰 ────────────────────────
+
+    /** 现在的铃声模式、勿扰状态、四路音量 */
+    @Suppress("DEPRECATION")
+    fun soundState(): Map<String, Any> {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            ?: return mapOf("ok" to false, "error" to "这台设备没有音频服务")
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+        val mode = when (am.ringerMode) {
+            android.media.AudioManager.RINGER_MODE_SILENT -> "静音"
+            android.media.AudioManager.RINGER_MODE_VIBRATE -> "震动"
+            else -> "响铃"
+        }
+        val dnd = when (nm?.currentInterruptionFilter) {
+            android.app.NotificationManager.INTERRUPTION_FILTER_NONE -> "勿扰（全部屏蔽）"
+            android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY -> "勿扰（只放行优先）"
+            android.app.NotificationManager.INTERRUPTION_FILTER_ALARMS -> "只允许闹钟"
+            android.app.NotificationManager.INTERRUPTION_FILTER_ALL -> "没开勿扰"
+            else -> "读不到（可能没给勿扰权限）"
+        }
+        fun level(stream: Int): Int {
+            val max = am.getStreamMaxVolume(stream).coerceAtLeast(1)
+            return am.getStreamVolume(stream) * 100 / max
+        }
+        return mapOf(
+            "ok" to true,
+            "mode" to mode,
+            "dnd" to dnd,
+            "volume" to mapOf(
+                "music" to level(android.media.AudioManager.STREAM_MUSIC),
+                "ring" to level(android.media.AudioManager.STREAM_RING),
+                "notification" to level(android.media.AudioManager.STREAM_NOTIFICATION),
+                "alarm" to level(android.media.AudioManager.STREAM_ALARM)
+            ),
+            "note" to "音量是百分比（0-100）"
+        )
+    }
+
+    /**
+     * 改铃声模式 / 改音量。
+     * mode：normal 响铃、vibrate 震动、silent 静音、dnd 勿扰（要勿扰权限；开着勿扰时系统会忽略铃声模式的改动）
+     * level：0-100，配 stream 用（music / ring / notification / alarm，默认 music）
+     */
+    @Suppress("DEPRECATION")
+    suspend fun setSound(mode: String?, level: Int?, stream: String?): Map<String, Any> = withContext(Dispatchers.IO) {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            ?: return@withContext mapOf("ok" to false, "error" to "这台设备没有音频服务")
+        val done = mutableListOf<String>()
+
+        val want = mode?.trim()?.lowercase()
+        if (!want.isNullOrBlank()) {
+            try {
+                when (want) {
+                    "silent", "静音", "mute" -> {
+                        am.ringerMode = android.media.AudioManager.RINGER_MODE_SILENT
+                        done.add("铃声模式=静音")
+                    }
+                    "vibrate", "震动" -> {
+                        am.ringerMode = android.media.AudioManager.RINGER_MODE_VIBRATE
+                        done.add("铃声模式=震动")
+                    }
+                    "normal", "响铃", "ring" -> {
+                        am.ringerMode = android.media.AudioManager.RINGER_MODE_NORMAL
+                        done.add("铃声模式=响铃")
+                    }
+                    "dnd", "勿扰" -> {
+                        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+                        if (nm == null) {
+                            return@withContext mapOf("ok" to false, "error" to "这台设备没有通知服务")
+                        }
+                        if (!nm.isNotificationPolicyAccessGranted) {
+                            return@withContext mapOf(
+                                "ok" to false,
+                                "error" to "改勿扰要先给「勿扰权限」：设置 → 权限 → 勿扰权限，点一下去开"
+                            )
+                        }
+                        nm.setInterruptionFilter(android.app.NotificationManager.INTERRUPTION_FILTER_NONE)
+                        done.add("已开勿扰")
+                    }
+                    else -> return@withContext mapOf("ok" to false, "error" to "mode 只认 normal / vibrate / silent / dnd")
+                }
+            } catch (e: Exception) {
+                return@withContext mapOf("ok" to false, "error" to (e.message ?: "改铃声模式失败"))
+            }
+        }
+
+        if (level != null) {
+            val target = when (stream?.trim()?.lowercase()) {
+                "ring", "铃声" -> android.media.AudioManager.STREAM_RING
+                "notification", "通知" -> android.media.AudioManager.STREAM_NOTIFICATION
+                "alarm", "闹钟" -> android.media.AudioManager.STREAM_ALARM
+                else -> android.media.AudioManager.STREAM_MUSIC
+            }
+            try {
+                val max = am.getStreamMaxVolume(target).coerceAtLeast(1)
+                val v = (level.coerceIn(0, 100) * max + 50) / 100
+                am.setStreamVolume(target, v, 0)
+                done.add("音量=${level.coerceIn(0, 100)}%")
+            } catch (e: Exception) {
+                return@withContext mapOf("ok" to false, "error" to (e.message ?: "改音量失败"))
+            }
+        }
+
+        if (done.isEmpty()) {
+            return@withContext mapOf("ok" to false, "error" to "没传要改的东西：给 mode，或给 level（可配 stream）")
+        }
+        val now = soundState().toMutableMap()
+        now["ok"] = true
+        now["changed"] = done
+        now
+    }
+
+    // ── 搜歌 / 点歌 ─────────────────────────────────
+
 
     /** 搜歌：返回歌名 + 歌手 + 专辑 + 歌曲 id（id 交给 play_song 用） */
     suspend fun searchSong(keyword: String, limit: Int): Map<String, Any> = withContext(Dispatchers.IO) {

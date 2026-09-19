@@ -53,12 +53,19 @@ class McpEngine(
         }
     }
 
-    /** 通知（notifications/xxx 这种没有 id 的请求）不需要回内容 */
-    fun isNotification(request: JsonObject): Boolean = request["id"] == null || request["id"] is JsonNull
+    /**
+     * 这条消息要不要回内容。
+     * 规范：没有 id 的（通知）和没有 method 的（客户端发来的 response）都只回 202，不带 body。
+     */
+    fun needsNoBody(request: JsonObject): Boolean {
+        val hasMethod = request["method"] != null && request["method"] !is JsonNull
+        val hasId = request["id"] != null && request["id"] !is JsonNull
+        return !hasMethod || !hasId
+    }
 
     suspend fun handle(request: JsonObject): JsonObject {
         val id = request["id"]
-        if (isNotification(request)) return JsonObject(emptyMap())
+        if (needsNoBody(request)) return JsonObject(emptyMap())
 
         val method = request["method"]?.jsonPrimitive?.contentOrNull ?: return error(id, "no method", -32600)
         val params = request["params"] as? JsonObject ?: JsonObject(emptyMap())
@@ -66,7 +73,7 @@ class McpEngine(
         return when (method) {
             "initialize" -> {
                 val want = params["protocolVersion"]?.jsonPrimitive?.contentOrNull
-                val known = setOf("2024-11-05", "2025-03-26", "2025-06-18")
+                val known = setOf("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
                 val reply = if (want != null && want in known) want else "2025-06-18"
                 result(
                 id,

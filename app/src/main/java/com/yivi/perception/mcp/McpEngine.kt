@@ -217,7 +217,7 @@ class McpEngine(
             "device_info" -> toolkit.deviceInfo()
             "battery" -> toolkit.battery()
             "location" -> toolkit.location()
-            "weather" -> toolkit.weather(s("city"))
+            "weather" -> toolkit.weather(s("city"), s("source"))
             "network" -> toolkit.network()
             "sensors" -> toolkit.sensors()
             "read_sensor" -> toolkit.readSensor(s("kind") ?: "all")

@@ -174,7 +174,7 @@ class NativeToolkit(
     }
 
     /** 天气：不给城市就用最近定位，数据来自 open-meteo（不用 key） */
-    suspend fun weather(city: String?): Map<String, Any> = withContext(Dispatchers.IO) {
+    suspend fun weather(city: String?, source: String?): Map<String, Any> = withContext(Dispatchers.IO) {
         var lat: Double
         var lng: Double
         var place = ""
@@ -217,9 +217,10 @@ class NativeToolkit(
         val cur = root["current"]?.jsonObject
         val daily = root["daily"]?.jsonObject
 
+        val wantForecast = !(source ?: "").equals("current", ignoreCase = true)
         val days = mutableListOf<Map<String, Any>>()
         val dates = daily?.get("time")?.asArray()
-        if (dates != null) {
+        if (dates != null && wantForecast) {
             dates.forEachIndexed { i, d ->
                 days.add(
                     mapOf(

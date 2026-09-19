@@ -5,7 +5,6 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
@@ -15,7 +14,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,12 +30,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -67,7 +61,20 @@ import com.yivi.perception.PerceptionApp
 import com.yivi.perception.data.ToolCatalog
 import com.yivi.perception.service.NetworkUtils
 import com.yivi.perception.service.ServerService
+import com.yivi.perception.ui.common.ActionPill
+import com.yivi.perception.ui.common.GlassCard
+import com.yivi.perception.ui.common.SectionLabel
+import com.yivi.perception.ui.common.SegRow
+import com.yivi.perception.ui.common.TextInputDialog
+import com.yivi.perception.ui.common.ThinDivider
 import com.yivi.perception.ui.theme.LocalPalette
+import java.io.File
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val dateFmt = DateTimeFormatter.ofPattern("yyyy年M月d日")
 
 @Composable
 fun SettingsScreen() {
@@ -77,17 +84,24 @@ fun SettingsScreen() {
 
     val accent by settings.accent.collectAsState()
     val dark by settings.dark.collectAsState()
-    val bgUri by settings.bgUri.collectAsState()
+    val bgPath by settings.bgUri.collectAsState()
     val logs by settings.logs.collectAsState()
+    val annivText by settings.annivText.collectAsState()
+    val annivType by settings.annivType.collectAsState()
+    val annivDate by settings.annivDate.collectAsState()
 
     var running by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
+    var editName by remember { mutableStateOf(false) }
+    var pickAnnivDate by remember { mutableStateOf(false) }
 
-    val notifPermission = if (Build.VERSION.SDK_INT >= 33) ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED else true
+    val notifPermission = if (Build.VERSION.SDK_INT >= 33) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    } else true
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) settings.setBgUri(uri.toString())
+        if (uri != null) copyWallpaper(context, uri)?.let { settings.setBgUri(it) }
     }
 
     fun startServer() {
@@ -96,6 +110,7 @@ fun SettingsScreen() {
         ContextCompat.startForegroundService(context, intent)
         running = true
     }
+
     fun stopServer() {
         val intent = Intent(context, ServerService::class.java).apply { action = ServerService.ACTION_STOP }
         context.startService(intent)
@@ -119,159 +134,240 @@ fun SettingsScreen() {
     val lanIp = NetworkUtils.localIp()
     val port = ServerService.PORT
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Text("设置", color = palette.textPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+    ) {
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "𝒮ℯ𝓉𝓉𝒾𝓃ℊ",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            color = palette.text,
+            style = MaterialTheme.typography.titleMedium.copy(brush = palette.titleBrush)
+        )
 
-            PanelCard {
-                Text("主题", color = palette.textSecondary, fontSize = 13.sp)
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ThemeSwatch("粉色", accent == "pink", listOf(Color(0xFFFF8FA3), Color(0xFFE06B82))) { settings.setAccent("pink") }
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("𝒯𝒽ℯ𝓂ℯ")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(16.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ThemeSwatch("粉色", accent != "gray", listOf(Color(0xFFFF9FB0), Color(0xFFE0708A))) { settings.setAccent("pink") }
                     ThemeSwatch("灰色", accent == "gray", listOf(Color(0xFFBFC7D4), Color(0xFF8E96A6))) { settings.setAccent("gray") }
                 }
-                Spacer(Modifier.height(16.dp))
-                Text("模式", color = palette.textSecondary, fontSize = 13.sp)
-                Spacer(Modifier.height(10.dp))
-                SegmentRow(
+                Spacer(Modifier.height(14.dp))
+                ThinDivider()
+                Spacer(Modifier.height(14.dp))
+                SegRow(
                     options = listOf("暗色", "亮色"),
                     selected = if (dark) 0 else 1,
                     onSelect = { settings.setDark(it == 0) }
                 )
             }
+        }
 
-            PanelCard {
-                Text("自定义背景", color = palette.textSecondary, fontSize = 13.sp)
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(palette.cardViolet)
-                    ) {
-                        if (bgUri.isNotBlank()) {
-                            val bmp = remember(bgUri) { loadBg(context.applicationContext, Uri.parse(bgUri)) }
-                            bmp?.let { Image(bitmap = it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                        }
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("ℬ𝒶𝒸𝓀ℊ𝓇ℴ𝓊𝓃𝒹")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(58.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(palette.chipBg.copy(alpha = 0.5f))
+                ) {
+                    val bmp = remember(bgPath) { loadBg(bgPath) }
+                    bmp?.let {
+                        Image(
+                            bitmap = it.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
-                    Spacer(Modifier.width(14.dp))
-                    TextButton(onClick = { pickLauncher.launch("image/*") }) { Text("选择图片", color = palette.accent) }
-                    Spacer(Modifier.width(6.dp))
-                    if (bgUri.isNotBlank()) TextButton(onClick = { settings.setBgUri("") }) { Text("清除", color = palette.textSecondary) }
                 }
-            }
-
-            // 工具盒
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(Brush.verticalGradient(palette.cardGradient))
-                    .border(1.dp, palette.lineViolet, RoundedCornerShape(22.dp))
-                    .clickable { showTools = true }
-                    .padding(18.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.List, contentDescription = null, tint = palette.accent, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Text("工具盒", color = palette.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.weight(1f))
-                    Text("${ToolCatalog.tools.size} 个工具", color = palette.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("换一张壁纸", color = palette.text, fontSize = 14.sp)
+                    Text(
+                        if (bgPath.isBlank()) "现在用的是主题渐变" else "卡片会跟着糊成毛玻璃",
+                        color = palette.textDim,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 3.dp)
+                    )
                 }
-            }
-
-            PanelCard {
-                Text("系统权限", color = palette.textSecondary, fontSize = 13.sp)
-                Spacer(Modifier.height(6.dp))
-                PermissionRow("无障碍", accEnabled.value) { openAccessibility(context) }
-                PermissionRow("通知监听", notifEnabled.value) { openNotificationAccess(context) }
-                Text("· 应用时间线：系统设置 → 特殊应用权限 → 使用情况访问权限", color = palette.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            }
-
-            PanelCard {
-                Text("MCP 地址", color = palette.textSecondary, fontSize = 13.sp)
-                Spacer(Modifier.height(8.dp))
-                Row {
-                    Text("本机: ", color = palette.textSecondary, fontSize = 13.sp)
-                    Text("http://127.0.0.1:$port/mcp", color = palette.accent, fontSize = 13.sp)
+                TextButton(onClick = { pickLauncher.launch("image/*") }) {
+                    Text("选图", color = MaterialTheme.colorScheme.primary)
                 }
-                Spacer(Modifier.height(6.dp))
-                Row {
-                    Text("局域网: ", color = palette.textSecondary, fontSize = 13.sp)
-                    Text("http://$lanIp:$port/mcp", color = palette.accent, fontSize = 13.sp)
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("日志", color = palette.textSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { showLogs = true }) { Text("查看日志", color = palette.accent) }
+                if (bgPath.isNotBlank()) {
+                    TextButton(onClick = { settings.setBgUri("") }) {
+                        Text("清除", color = palette.textDim)
+                    }
                 }
             }
         }
 
-        // 右下角正方形启动键
-        StartButton(
-            running = running,
-            onClick = { if (running) stopServer() else startServer() },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 26.dp)
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("𝒜𝓃𝓃𝒾𝓋ℯ𝓇𝓈𝒶𝓇𝓎")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("名字", color = palette.textLight, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        annivText.ifBlank { "纪念日" },
+                        color = palette.text,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable { editName = true }
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("日期", color = palette.textLight, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        if (annivDate > 0) {
+                            Instant.ofEpochMilli(annivDate).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
+                        } else "未设置",
+                        color = palette.text,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable { pickAnnivDate = true }
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                SegRow(
+                    options = listOf("正数", "倒数"),
+                    selected = if (annivType == "倒数") 1 else 0,
+                    onSelect = { settings.setAnnivType(if (it == 1) "倒数" else "正数") }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("𝒯ℴℴ𝓁𝓈")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(
+            modifier = Modifier.fillMaxWidth().clickable { showTools = true },
+            shape = RoundedCornerShape(24.dp),
+            showHighlight = false
+        ) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("工具盒", color = palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text("给别的 AI 调的本机工具", color = palette.textDim, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+                }
+                Text("${ToolCatalog.tools.size} 个", color = palette.accent, fontSize = 12.sp)
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("𝒫ℯ𝓇𝓂𝒾𝓈𝓈𝒾ℴ𝓃")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                PermissionRow("无障碍", accEnabled.value) { openAccessibility(context) }
+                ThinDivider()
+                PermissionRow("通知监听", notifEnabled.value) { openNotificationAccess(context) }
+                Spacer(Modifier.height(4.dp))
+                Text("· 应用时间线：系统设置 → 特殊应用权限 → 使用情况访问", color = palette.textDim, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("ℳ𝒞𝒫 𝒮ℯ𝓇𝓋ℯ𝓇")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(16.dp)) {
+                ActionPill(
+                    text = if (running) "停止服务" else "启动服务",
+                    onClick = { if (running) stopServer() else startServer() },
+                    modifier = Modifier.fillMaxWidth(),
+                    danger = running
+                )
+                Spacer(Modifier.height(14.dp))
+                AddressRow("本机", "http://127.0.0.1:$port/mcp")
+                Spacer(Modifier.height(6.dp))
+                AddressRow("局域网", "http://$lanIp:$port/mcp")
+                Spacer(Modifier.height(12.dp))
+                ThinDivider()
+                Row(
+                    Modifier.fillMaxWidth().clickable { showLogs = true }.padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("运行日志", color = palette.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text("${logs.size} 条", color = palette.textDim, fontSize = 12.sp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(120.dp))
+    }
+
+    if (editName) {
+        TextInputDialog(
+            title = "纪念日名字",
+            initial = annivText,
+            placeholder = "比如 我们在一起",
+            onDismiss = { editName = false },
+            onSave = { settings.setAnnivText(it.ifBlank { "纪念日" }); editName = false }
         )
+    }
+
+    if (pickAnnivDate) {
+        val initial = if (annivDate > 0) annivDate else System.currentTimeMillis()
+        val state = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = initial)
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickAnnivDate = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { settings.setAnnivDate(it) }
+                    pickAnnivDate = false
+                }) { Text("确定", color = MaterialTheme.colorScheme.primary) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pickAnnivDate = false }) { Text("取消", color = palette.textDim) }
+            }
+        ) { androidx.compose.material3.DatePicker(state = state) }
     }
 
     if (showTools) {
         AlertDialog(
             onDismissRequest = { showTools = false },
-            containerColor = palette.cardBottom,
+            containerColor = palette.surface,
             shape = RoundedCornerShape(24.dp),
-            title = { Text("工具盒 · ${ToolCatalog.tools.size} 个", color = palette.textPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text("工具盒 · ${ToolCatalog.tools.size} 个", color = palette.text, fontWeight = FontWeight.Medium) },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     ToolCatalog.tools.forEach { (name, desc) ->
-                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                            Text(name, color = palette.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Text(desc, color = palette.textSecondary, fontSize = 12.sp)
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            Text(name, color = palette.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text(desc, color = palette.textLight, fontSize = 11.sp)
                         }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showTools = false }) { Text("关闭", color = palette.accent) } }
+            confirmButton = { TextButton(onClick = { showTools = false }) { Text("关闭", color = MaterialTheme.colorScheme.primary) } }
         )
     }
 
     if (showLogs) {
         AlertDialog(
             onDismissRequest = { showLogs = false },
-            containerColor = palette.cardBottom,
+            containerColor = palette.surface,
             shape = RoundedCornerShape(24.dp),
-            title = { Text("运行日志", color = palette.textPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text("运行日志", color = palette.text, fontWeight = FontWeight.Medium) },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    if (logs.isEmpty()) Text("暂无日志", color = palette.textSecondary)
-                    logs.reversed().forEach { Text(it, color = palette.textSecondary, fontSize = 12.sp) }
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (logs.isEmpty()) Text("暂无日志", color = palette.textLight, fontSize = 12.sp)
+                    logs.reversed().forEach { Text(it, color = palette.textLight, fontSize = 11.sp, modifier = Modifier.padding(vertical = 1.dp)) }
                 }
             },
-            confirmButton = { TextButton(onClick = { showLogs = false }) { Text("关闭", color = palette.accent) } }
+            confirmButton = { TextButton(onClick = { showLogs = false }) { Text("关闭", color = MaterialTheme.colorScheme.primary) } }
         )
-    }
-}
-
-@Composable
-private fun PanelCard(content: @Composable () -> Unit) {
-    val palette = LocalPalette.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Brush.verticalGradient(palette.cardGradient))
-            .border(1.dp, palette.lineViolet, RoundedCornerShape(24.dp))
-            .padding(18.dp)
-    ) {
-        content()
     }
 }
 
@@ -280,64 +376,28 @@ private fun ThemeSwatch(label: String, active: Boolean, colors: List<Color>, onC
     val palette = LocalPalette.current
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            modifier = Modifier
-                .size(64.dp)
+            Modifier
+                .size(62.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .background(Brush.verticalGradient(colors))
-                .then(if (active) Modifier.border(3.dp, palette.accent, RoundedCornerShape(20.dp)) else Modifier)
-                .clickable(onClick = onClick)
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(label, color = if (active) palette.textPrimary else palette.textSecondary, fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun SegmentRow(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
-    val palette = LocalPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(palette.cardViolet.copy(alpha = 0.4f))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-        options.forEachIndexed { i, label ->
-            val active = i == selected
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (active) palette.accent.copy(alpha = 0.25f) else Color.Transparent)
-                    .clickable { onSelect(i) }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(label, color = if (active) palette.textPrimary else palette.textSecondary, fontSize = 14.sp, fontWeight = if (active) FontWeight.Medium else FontWeight.Normal)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            if (active) {
+                Box(Modifier.size(16.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.85f)))
             }
         }
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = if (active) palette.text else palette.textDim, fontSize = 12.sp)
     }
 }
 
 @Composable
-private fun StartButton(running: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun AddressRow(label: String, value: String) {
     val palette = LocalPalette.current
-    Box(
-        modifier = modifier
-            .size(64.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Brush.verticalGradient(palette.cardGradient))
-            .border(1.dp, if (running) palette.accent else palette.lineViolet, RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-            contentDescription = if (running) "停止" else "启动",
-            tint = if (running) palette.accent else palette.textPrimary,
-            modifier = Modifier.size(30.dp)
-        )
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = palette.textLight, fontSize = 12.sp, modifier = Modifier.width(46.dp))
+        Text(value, color = palette.accent, fontSize = 12.sp)
     }
 }
 
@@ -346,18 +406,55 @@ private fun PermissionRow(label: String, enabled: Boolean, onClick: () -> Unit) 
     val palette = LocalPalette.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp)
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp)
     ) {
-        Text(label, color = palette.textPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(label, color = palette.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Box(
-            modifier = Modifier
-                .size(18.dp)
+            Modifier
+                .size(16.dp)
                 .clip(CircleShape)
-                .background(if (enabled) palette.accent else palette.cardViolet.copy(alpha = 0.6f))
+                .background(if (enabled) palette.accent else palette.chipBg.copy(alpha = 0.6f))
         )
         Spacer(Modifier.width(6.dp))
-        Text(if (enabled) "已开启" else "去开启", color = if (enabled) palette.accent else palette.textSecondary, fontSize = 12.sp)
+        Text(
+            if (enabled) "已开启" else "去开启",
+            color = if (enabled) palette.accent else palette.textDim,
+            fontSize = 12.sp
+        )
+        Spacer(Modifier.width(2.dp))
+        Text("›", color = palette.textDim, fontSize = 15.sp)
     }
+}
+
+private fun copyWallpaper(context: Context, uri: Uri): String? = try {
+    val dir = File(context.filesDir, "wallpaper")
+    dir.mkdirs()
+    val target = File(dir, "bg_${System.currentTimeMillis()}.jpg")
+    context.contentResolver.openInputStream(uri)?.use { ins ->
+        target.outputStream().use { out -> ins.copyTo(out) }
+    }
+    // 旧的壁纸删掉，省地方
+    dir.listFiles()?.filter { it != target }?.forEach { it.delete() }
+    if (target.exists() && target.length() > 0) target.absolutePath else null
+} catch (e: Exception) {
+    null
+}
+
+private fun loadBg(path: String) = try {
+    if (path.isBlank()) null
+    else {
+        val f = File(path)
+        if (!f.exists()) null
+        else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            var sample = 1
+            while (bounds.outWidth / sample > 400) sample *= 2
+            BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+        }
+    }
+} catch (e: Exception) {
+    null
 }
 
 private fun isAccessibilityEnabled(context: Context): Boolean {
@@ -379,10 +476,4 @@ private fun openNotificationAccess(context: Context) {
     try {
         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (e: Exception) { }
-}
-
-private fun loadBg(context: android.content.Context, uri: Uri): Bitmap? {
-    return try {
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-    } catch (e: Exception) { null }
 }

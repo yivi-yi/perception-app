@@ -108,6 +108,8 @@ fun SettingsScreen() {
     var showTools by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
+    var selfTestRunning by remember { mutableStateOf(false) }
+    var selfTestResult by remember { mutableStateOf<String?>(null) }
     var editCity by remember { mutableStateOf(false) }
     val weatherCity by settings.weatherCity.collectAsState()
     var showUsage by remember { mutableStateOf(false) }
@@ -174,7 +176,7 @@ fun SettingsScreen() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    val lanIp = NetworkUtils.localIp()
+    val lanIps = remember { NetworkUtils.allIps() }
     val port = ServerService.PORT
 
     Column(
@@ -210,9 +212,62 @@ fun SettingsScreen() {
                     danger = running
                 )
                 Spacer(Modifier.height(14.dp))
-                AddressRow("本机", "http://127.0.0.1:$port/mcp")
-                Spacer(Modifier.height(6.dp))
-                AddressRow("局域网", "http://$lanIp:$port/mcp")
+                AddressRow("本机", "http://127.0.0.1:$port/mcp") {
+                    copyText(context, "http://127.0.0.1:$port/mcp")
+                }
+                val ips = lanIps
+                if (ips.isEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    AddressRow("局域网", "读不到局域网 IP，先连上 WiFi 或热点")
+                } else {
+                    ips.forEach { ip ->
+                        Spacer(Modifier.height(6.dp))
+                        AddressRow("局域网", "http://$ip:$port/mcp") {
+                            copyText(context, "http://$ip:$port/mcp")
+                        }
+                    }
+                }
+                if (!notifPermission) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "没给「通知」权限，通知栏不会显示服务通知（服务照样在跑）",
+                        color = palette.textDim,
+                        fontSize = 10.5.sp
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    ActionPill(
+                        text = "去给通知权限",
+                        onClick = { permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                val startError = PerceptionApp.instance.mcpServer.lastError
+                if (!running && !startError.isNullOrBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("上次没起来：$startError", color = palette.textDim, fontSize = 10.5.sp)
+                }
+                Spacer(Modifier.height(10.dp))
+                ActionPill(
+                    text = if (selfTestRunning) "自测中…" else "自测（本机连自己试试）",
+                    onClick = {
+                        if (!selfTestRunning) {
+                            selfTestRunning = true
+                            selfTestResult = null
+                            scope.launch {
+                                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    selfTest(port)
+                                }
+                                selfTestResult = r
+                                selfTestRunning = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                selfTestResult?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(it, color = palette.textDim, fontSize = 10.5.sp)
+                }
                 Spacer(Modifier.height(12.dp))
                 ThinDivider()
                 Row(
@@ -585,11 +640,42 @@ private fun JumpRow(title: String, value: String, valueColor: Color, onClick: ()
 }
 
 @Composable
-private fun AddressRow(label: String, value: String) {
+private fun AddressRow(label: String, value: String, onCopy: (() -> Unit)? = null) {
     val palette = LocalPalette.current
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.textLight, fontSize = 12.sp, modifier = Modifier.width(46.dp))
-        Text(value, color = palette.accent, fontSize = 12.sp)
+        Text(value, color = palette.accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        if (onCopy != null) {
+            Text("复制", color = palette.textDim, fontSize = 11.sp, modifier = Modifier.clickable(onClick = onCopy))
+        }
+    }
+}
+
+/** 本机连自己一次：能分清是"服务没起来"还是"外面连不进来" */
+private fun selfTest(port: Int): String = try {
+    val conn = java.net.URL("http://127.0.0.1:$port/mcp").openConnection() as java.net.HttpURLConnection
+    conn.requestMethod = "POST"
+    conn.connectTimeout = 4000
+    conn.readTimeout = 8000
+    conn.doOutput = true
+    conn.setRequestProperty("Content-Type", "application/json")
+    conn.setRequestProperty("Accept", "application/json, text/event-stream")
+    val body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{" +
+        "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"selftest\",\"version\":\"1\"}}}"
+    conn.outputStream.use { it.write(body.toByteArray()) }
+    val code = conn.responseCode
+    val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+        ?.bufferedReader()?.use { it.readText() } ?: ""
+    "通了：HTTP $code · ${text.replace("\n", " ").take(90)}"
+} catch (e: Exception) {
+    "没通：${e.message ?: e.javaClass.simpleName}（服务没起？或者端口被占）"
+}
+
+private fun copyText(context: Context, text: String) {
+    try {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("mcp", text))
+    } catch (_: Exception) {
     }
 }
 

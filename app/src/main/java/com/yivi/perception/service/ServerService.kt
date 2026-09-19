@@ -95,7 +95,7 @@ class ServerService : Service() {
         val notification: Notification = NotificationCompat.Builder(this, "perception_server")
             .setContentTitle("Perception · MCP 服务运行中")
             .setContentText("局域网地址 http://${NetworkUtils.localIp()}:$PORT/mcp（点通知可回到 APP）")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notify)
             .setOngoing(true)
             .setContentIntent(
                 android.app.PendingIntent.getActivity(
@@ -105,6 +105,11 @@ class ServerService : Service() {
             )
             .addAction(0, "停止服务", stopIntent)
             .build()
-        startForeground(10, notification)
+        try {
+            startForeground(10, notification)
+        } catch (e: Exception) {
+            // 前台服务起不来（老系统限制/权限异常）也不能让服务直接崩，至少把原因写进日志
+            com.yivi.perception.PerceptionApp.instance.settings.addLog("前台通知没挂上：${e.message}")
+        }
     }
 }

@@ -23,6 +23,13 @@ class McpEngine(
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** 请求里的方法名，给日志用 */
+    fun methodName(request: JsonObject): String =
+        request["method"]?.jsonPrimitive?.contentOrNull ?: "?"
+
+    /** 工具数量，给 /status 用 */
+    fun toolCount(): Int = Tools.all.size
+
     /** 工具表从 data/Tools 生成，跟设置页里显示的说明书是同一份 */
     private fun toolList(): List<JsonObject> = Tools.all.map { spec ->
         buildJsonObject {

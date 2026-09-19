@@ -1,38 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 极简线条：小行星 + 一圈轨道 + 一颗小星 -->
+<!-- 单色层：系统会自己上色，只取形状 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 星球本体（圆心 54,54，半径 17） -->
     <path
         android:pathData="M54,54 m-17,0 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0"
-        android:strokeColor="#FFFFB3C0"
+        android:strokeColor="#FF000000"
         android:strokeWidth="4"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
 
-    <!-- 轨道：压扁的椭圆，斜 20 度 -->
     <group
         android:pivotX="54"
         android:pivotY="54"
         android:rotation="-20">
         <path
             android:pathData="M25,54 a29,10 0 1,0 58,0 a29,10 0 1,0 -58,0"
-            android:strokeColor="#FFFFB3C0"
+            android:strokeColor="#FF000000"
             android:strokeWidth="3.2"
             android:strokeLineCap="round" />
         <path
             android:pathData="M79,54 m-3.6,0 a3.6,3.6 0 1,0 7.2,0 a3.6,3.6 0 1,0 -7.2,0"
-            android:fillColor="#FFFFB3C0" />
+            android:fillColor="#FF000000" />
     </group>
 
-    <!-- 右上角一颗小星 -->
     <path
         android:pathData="M77,30 L77,38 M73,34 L81,34"
-        android:strokeColor="#FFFFB3C0"
+        android:strokeColor="#FF000000"
         android:strokeWidth="2.6"
         android:strokeLineCap="round" />
 </vector>

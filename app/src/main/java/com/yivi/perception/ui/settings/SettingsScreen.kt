@@ -70,7 +70,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.yivi.perception.PerceptionApp
-import com.yivi.perception.data.ToolCatalog
+import com.yivi.perception.data.Tools
 import com.yivi.perception.service.NetworkUtils
 import com.yivi.perception.service.ServerService
 import com.yivi.perception.ui.common.ActionPill
@@ -108,6 +108,7 @@ fun SettingsScreen() {
     val scope = rememberCoroutineScope()
     var batteryOk by remember { mutableStateOf(isIgnoringBattery(context)) }
     var dndOk by remember { mutableStateOf(isDndGranted(context)) }
+    var overlayOk by remember { mutableStateOf(canDrawOverlays(context)) }
     val versionName = remember { appVersion(context) }
 
     val notifPermission = if (Build.VERSION.SDK_INT >= 33) {
@@ -153,6 +154,7 @@ fun SettingsScreen() {
                 notifEnabled.value = isNotifEnabled(context)
                 batteryOk = isIgnoringBattery(context)
                 dndOk = isDndGranted(context)
+                overlayOk = canDrawOverlays(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
@@ -313,7 +315,7 @@ fun SettingsScreen() {
                         Text("工具盒", color = palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                         Text("给别的 AI 调的本机工具", color = palette.textDim, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
                     }
-                    Text("${ToolCatalog.tools.size} 个", color = palette.accent, fontSize = 12.sp)
+                    Text("${Tools.all.size} 个", color = palette.accent, fontSize = 12.sp)
                 }
             }
         }
@@ -328,6 +330,8 @@ fun SettingsScreen() {
                 PermissionRow("通知监听", notifEnabled.value) { openNotificationAccess(context) }
                 ThinDivider()
                 PermissionRow("勿扰权限（改勿扰用）", dndOk) { openDndAccess(context) }
+                ThinDivider()
+                PermissionRow("悬浮窗（开着服务更稳）", overlayOk) { openOverlayAccess(context) }
                 Spacer(Modifier.height(4.dp))
                 Text("· 应用时间线：系统设置 → 特殊应用权限 → 使用情况访问", color = palette.textDim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
@@ -480,17 +484,28 @@ fun SettingsScreen() {
             onDismissRequest = { showTools = false },
             containerColor = palette.dialogTint,
             shape = RoundedCornerShape(22.dp),
-            title = { Text("工具盒 · ${ToolCatalog.tools.size} 个", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
+            title = { Text("工具盒 · ${Tools.all.size} 个", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
             text = {
                 Column(
                     Modifier
-                        .heightIn(max = 330.dp)
+                        .heightIn(max = 380.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    ToolCatalog.tools.forEach { (name, desc) ->
-                        Column(Modifier.padding(bottom = 10.dp)) {
-                            Text(name, color = palette.accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-                            Text(desc, color = palette.textLight, fontSize = 11.sp, lineHeight = 16.sp)
+                    Tools.all.forEach { spec ->
+                        Column(Modifier.padding(bottom = 12.dp)) {
+                            Text(spec.name, color = palette.accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                            Text(spec.desc, color = palette.textLight, fontSize = 11.sp, lineHeight = 16.sp)
+                            if (spec.params.isNotEmpty()) {
+                                Spacer(Modifier.height(3.dp))
+                                spec.params.forEach { p ->
+                                    Text(
+                                        "· ${p.name} (${p.type}${if (p.required) "，必填" else ""})：${p.desc}",
+                                        color = palette.textDim,
+                                        fontSize = 10.5.sp,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -705,6 +720,19 @@ private fun openAccessibility(context: Context) {
 private fun isDndGranted(context: Context): Boolean {
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
     return nm?.isNotificationPolicyAccessGranted ?: false
+}
+
+private fun canDrawOverlays(context: Context): Boolean =
+    android.provider.Settings.canDrawOverlays(context)
+
+private fun openOverlayAccess(context: Context) {
+    try {
+        context.startActivity(
+            Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (e: Exception) {
+    }
 }
 
 private fun openDndAccess(context: Context) {

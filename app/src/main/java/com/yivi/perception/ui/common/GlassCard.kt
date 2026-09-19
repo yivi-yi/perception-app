@@ -10,7 +10,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -69,6 +71,8 @@ fun GlassCard(
                     .matchParentSize()
                     .clip(shape)
                     .clipToBounds()
+                    // 安卓 12 以上走系统真高斯模糊；以下版本这行自动忽略，靠下面叠位抹平
+                    .blur(16.dp)
                     .onGloballyPositioned { pos = it.positionInWindow() }
                     .drawBehind {
                         val img = blur

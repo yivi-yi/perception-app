@@ -35,7 +35,7 @@ data class Palette(
 
     /** 毛玻璃卡片里的半透明底：alpha 压低，雾化才透得出来 */
     val glassTint: Color
-        get() = if (isDark) Color(0xFF17171B).copy(alpha = 0.34f) else Color.White.copy(alpha = 0.44f)
+        get() = if (isDark) Color(0xFF17171B).copy(alpha = 0.30f) else Color.White.copy(alpha = 0.42f)
 
     /** 弹窗底色：跟主题色，稍微沾一点主色 */
     val dialogTint: Color

@@ -1,6 +1,8 @@
 package com.yivi.perception.mcp
 
 import com.yivi.perception.NativeToolkit
+import com.yivi.perception.data.ToolSpec
+import com.yivi.perception.data.Tools
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -21,120 +23,26 @@ class McpEngine(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** 工具参数：名字、类型、说明、是否必填 */
-    private data class P(val name: String, val type: String, val desc: String, val required: Boolean = false)
-
-    private fun str(name: String, desc: String) = P(name, "string", desc)
-    private fun num(name: String, desc: String) = P(name, "integer", desc)
-    private fun bool(name: String, desc: String) = P(name, "boolean", desc)
-    private fun reqStr(name: String, desc: String) = P(name, "string", desc, true)
-    private fun reqNum(name: String, desc: String) = P(name, "integer", desc, true)
-
-    private val timeHint = "毫秒时间戳（13 位数字，比如 1789000000000），不是 '07:30' 这种字符串"
-    private val repeatHint = "重复星期，1=周一 … 7=周日，如 \"1,3,5\"；空字符串=只响一次"
-    private val actionHint = "update=改这一条；delete=删这一条"
-
-    private fun toolList(): List<JsonObject> = listOf(
-        // 日程
-        tool("list_schedules", "查这台手机上所有日程，返回 id、标题、备注、时间（毫秒时间戳）、是否提醒。改或删之前先用它拿 id。"),
-        tool(
-            "add_schedule", "加一条日程。开了提醒的话，到点会在这台手机上弹通知。",
-            reqStr("title", "日程标题"),
-            str("note", "备注，可空"),
-            num("time", timeHint),
-            bool("remind", "true=到点弹通知提醒，不传按 false")
-        ),
-        tool(
-            "change_schedule", "改或删一条日程。只传要改的字段，没传的保持原样。",
-            reqStr("action", actionHint),
-            reqNum("id", "日程 id，来自 list_schedules"),
-            str("title", "新标题"),
-            str("note", "新备注"),
-            num("time", timeHint),
-            bool("remind", "是否要提醒")
-        ),
-        // 闹钟
-        tool("list_alarms", "查这台手机上所有闹钟，返回 id、标签、备注、时间、重复星期、是否开着。"),
-        tool(
-            "add_alarm", "加一个闹钟，到点会在这台手机上一直响（系统铃声+震动），响到有人点通知上的「暂停」或「关闭」为止。",
-            str("title", "闹钟标签，可空"),
-            str("note", "备注，可空"),
-            num("time", "$timeHint；如果是重复闹钟，只取里面的时分"),
-            str("repeatDays", repeatHint)
-        ),
-        tool(
-            "change_alarm", "改或删一个闹钟。只传要改的字段，没传的保持原样。",
-            reqStr("action", actionHint),
-            reqNum("id", "闹钟 id，来自 list_alarms"),
-            str("title", "新标签"),
-            str("note", "新备注"),
-            num("time", timeHint),
-            str("repeatDays", repeatHint)
-        ),
-        // 设备
-        tool("device_info", "这台手机的牌子、型号、安卓版本。"),
-        tool("battery", "电量百分比，以及现在是不是在充电。"),
-        tool("location", "这台手机现在在哪，返回经纬度和文字地址。会先试着拿实时定位（最多等 6 秒），拿不到就退回最近一次定位，并用 realtime / age_minutes 告诉你是不是实时的。"),
-        tool(
-            "weather", "查天气，来自 open-meteo（不用自己配 key）。",
-            str("city", "城市名，如「广州」；不传就用设置里的默认城市，都没有才用手机当前位置（要定位权限）")
-        ),
-        tool("network", "当前连的 WiFi 名字、信号强度、本机 IP。安卓 10 以上读 WiFi 名需要定位权限。"),
-        tool("sensors", "这台手机上有哪些传感器（只是清单）。要读数用 read_sensor。"),
-        tool(
-            "read_sensor", "读一次传感器的当前值：光线强弱、距离、有没有在动、手机朝向、走了多少步。",
-            reqStr("kind", "light=光线 / proximity=距离 / motion=动静 / direction=朝向 / steps=步数 / pressure=气压 / humidity=湿度 / temperature=环境温度 / magnetic=磁场强度 / all=全都要")
-        ),
-        tool("open_app", "在这台手机上打开一个应用。", reqStr("packageName", "应用包名，如 com.tencent.mm；用 installed_apps 拿")),
-        tool("installed_apps", "列出这台手机上已安装、能启动的应用（名字 + 包名）。"),
-        tool("sound_state", "看这台手机现在的铃声模式（响铃 / 震动 / 静音）、有没有开勿扰，以及媒体 / 铃声 / 通知 / 闹钟四路音量（0-100 的百分比）。改之前先看这个就知道现在多大。"),
-        tool(
-            "set_sound", "改这台手机的铃声模式或音量，改完会返回现在的状态。只传要改的那个就行。",
-            str("mode", "normal=响铃 / vibrate=震动 / silent=静音 / dnd=开勿扰（勿扰要手机先给「勿扰权限」，没给会提示去开）"),
-            num("level", "音量百分比 0-100（不是原始档位），配合 stream 用"),
-            str("stream", "改哪一路音量：music 媒体（默认）/ ring 铃声 / notification 通知 / alarm 闹钟")
-        ),
-        // 手机状态
-        tool("current_app", "这台手机现在前台是哪个应用，返回应用名和包名（要开无障碍权限）。"),
-        tool(
-            "read_notifications", "读这台手机的通知，两路互不覆盖，要开通知监听权限。",
-            str("kind", "current=只看通知栏现在挂着的 / recent=只看最近收到的；不传两个都返回"),
-            num("limit", "每类最多几条，默认 20，最多 20")
-        ),
-        tool("ambient", "录 3 秒环境音，估一个分贝值，判断安静还是吵、像不像有人在说话（要麦克风权限）。"),
-        // 点歌
-        tool(
-            "search_song", "搜歌，返回歌名、歌手、专辑和歌曲 id（id 交给 play_song）。这是公开接口，不用配任何东西。",
-            reqStr("keyword", "歌名，或者「歌名 歌手」"),
-            num("limit", "返回几条，默认 5，最多 10")
-        ),
-        tool(
-            "play_song", "按歌曲 id 在这台手机上打开网易云的那首歌。id 要用 search_song 先搜出来。",
-            reqNum("id", "歌曲 id，来自 search_song"),
-            str("name", "歌名，可空，只用来回话时念一下")
-        )
-    )
-
-    private fun tool(name: String, desc: String, vararg props: P): JsonObject {
-        val schema = buildJsonObject {
-            put("type", JsonPrimitive("object"))
-            put("properties", buildJsonObject {
-                props.forEach { p ->
-                    put(p.name, buildJsonObject {
-                        put("type", JsonPrimitive(p.type))
-                        put("description", JsonPrimitive(p.desc))
-                    })
+    /** 工具表从 data/Tools 生成，跟设置页里显示的说明书是同一份 */
+    private fun toolList(): List<JsonObject> = Tools.all.map { spec ->
+        buildJsonObject {
+            put("name", JsonPrimitive(spec.name))
+            put("description", JsonPrimitive(spec.desc))
+            put("inputSchema", buildJsonObject {
+                put("type", JsonPrimitive("object"))
+                put("properties", buildJsonObject {
+                    spec.params.forEach { p ->
+                        put(p.name, buildJsonObject {
+                            put("type", JsonPrimitive(p.type))
+                            put("description", JsonPrimitive(p.desc))
+                        })
+                    }
+                })
+                val required = spec.params.filter { it.required }
+                if (required.isNotEmpty()) {
+                    put("required", JsonArray(required.map { JsonPrimitive(it.name) }))
                 }
             })
-            val required = props.filter { it.required }
-            if (required.isNotEmpty()) {
-                put("required", JsonArray(required.map { JsonPrimitive(it.name) }))
-            }
-        }
-        return buildJsonObject {
-            put("name", JsonPrimitive(name))
-            put("description", JsonPrimitive(desc))
-            put("inputSchema", schema)
         }
     }
 
@@ -222,7 +130,7 @@ class McpEngine(
             "sensors" -> toolkit.sensors()
             "read_sensor" -> toolkit.readSensor(s("kind") ?: "all")
             "sound_state" -> toolkit.soundState()
-            "set_sound" -> toolkit.setSound(s("mode"), l("level")?.toInt(), s("stream"))
+            "set_sound" -> toolkit.setSound(s("mode"), b("dnd"), l("level")?.toInt(), s("stream"))
             "open_app" -> toolkit.openApp(s("packageName") ?: "")
             "installed_apps" -> toolkit.installedApps()
             "current_app" -> toolkit.currentApp()

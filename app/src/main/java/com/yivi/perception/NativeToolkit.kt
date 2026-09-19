@@ -590,11 +590,12 @@ class NativeToolkit(
 
     /**
      * 改铃声模式 / 改音量。
-     * mode：normal 响铃、vibrate 震动、silent 静音、dnd 勿扰（要勿扰权限；开着勿扰时系统会忽略铃声模式的改动）
+     * mode：normal 响铃、vibrate 震动、silent 静音
+     * dnd：true 开勿扰 / false 关勿扰（要勿扰权限；开着勿扰时系统会忽略铃声模式的改动）
      * level：0-100，配 stream 用（music / ring / notification / alarm，默认 music）
      */
     @Suppress("DEPRECATION")
-    suspend fun setSound(mode: String?, level: Int?, stream: String?): Map<String, Any> = withContext(Dispatchers.IO) {
+    suspend fun setSound(mode: String?, dnd: Boolean?, level: Int?, stream: String?): Map<String, Any> = withContext(Dispatchers.IO) {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
             ?: return@withContext mapOf("ok" to false, "error" to "这台设备没有音频服务")
         val done = mutableListOf<String>()
@@ -616,6 +617,7 @@ class NativeToolkit(
                         done.add("铃声模式=响铃")
                     }
                     "dnd", "勿扰" -> {
+                        // 老写法：mode=dnd 等于开勿扰
                         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
                         if (nm == null) {
                             return@withContext mapOf("ok" to false, "error" to "这台设备没有通知服务")
@@ -633,6 +635,28 @@ class NativeToolkit(
                 }
             } catch (e: Exception) {
                 return@withContext mapOf("ok" to false, "error" to (e.message ?: "改铃声模式失败"))
+            }
+        }
+
+        if (dnd != null) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            if (nm == null) {
+                return@withContext mapOf("ok" to false, "error" to "这台设备没有通知服务")
+            }
+            if (!nm.isNotificationPolicyAccessGranted) {
+                return@withContext mapOf(
+                    "ok" to false,
+                    "error" to "改勿扰要先给「勿扰权限」：设置 → 权限 → 勿扰权限，点一下去开"
+                )
+            }
+            try {
+                nm.setInterruptionFilter(
+                    if (dnd) android.app.NotificationManager.INTERRUPTION_FILTER_NONE
+                    else android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+                )
+                done.add(if (dnd) "已开勿扰" else "已关勿扰")
+            } catch (e: Exception) {
+                return@withContext mapOf("ok" to false, "error" to (e.message ?: "改勿扰失败"))
             }
         }
 
@@ -654,7 +678,7 @@ class NativeToolkit(
         }
 
         if (done.isEmpty()) {
-            return@withContext mapOf("ok" to false, "error" to "没传要改的东西：给 mode，或给 level（可配 stream）")
+            return@withContext mapOf("ok" to false, "error" to "没传要改的东西：mode / dnd / level 至少给一个")
         }
         val now = soundState().toMutableMap()
         now["ok"] = true

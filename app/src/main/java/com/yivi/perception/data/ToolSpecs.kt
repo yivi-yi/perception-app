@@ -103,8 +103,7 @@ object Tools {
             listOf(
                 ToolParam(
                     "kind", "string",
-                    "light=光线 / proximity=距离 / motion=动静 / direction=朝向 / steps=步数 / pressure=气压 / humidity=湿度 / temperature=环境温度 / magnetic=磁场强度 / all=全都要",
-                    true
+                    "light=光线 / proximity=距离 / motion=动静 / direction=朝向 / steps=步数 / pressure=气压 / humidity=湿度 / temperature=环境温度 / magnetic=磁场强度；不传 = all 全都要"
                 )
             )
         ),

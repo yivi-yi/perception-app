@@ -7,7 +7,6 @@ class PermissionService : AccessibilityService() {
 
     companion object {
         @Volatile var lastPackage: String? = null
-        @Volatile var lastScreenText: String = ""
 
         @Volatile
         private var service: PermissionService? = null
@@ -24,10 +23,6 @@ class PermissionService : AccessibilityService() {
         val pkg = event.packageName?.toString()
         if (pkg != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             lastPackage = pkg
-        }
-        val text = event.text?.joinToString(" ") { it.toString() }
-        if (!text.isNullOrBlank()) {
-            lastScreenText = text.take(3000)
         }
     }
 

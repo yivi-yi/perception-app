@@ -11,7 +11,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
@@ -38,10 +41,15 @@ fun AppBackground(content: @Composable () -> Unit) {
     val palette = LocalPalette.current
     val bgPath by PerceptionApp.instance.settings.bgUri.collectAsState()
 
-    val full = remember(bgPath) { decodeWallpaper(bgPath, 1800) }
-    // 没壁纸的时候自己造一张柔光底（小图，放大后就是糊的），卡片才有东西可以糊
-    val small = remember(bgPath, palette.isDark, palette.accent) {
-        decodeWallpaper(bgPath, 48) ?: makeSoftBackdrop(palette)
+    // 解码放到 IO 里做，壁纸大也不会卡首屏
+    val full by produceState<ImageBitmap?>(null, bgPath) {
+        value = withContext(Dispatchers.IO) { decodeWallpaper(bgPath, 1800) }
+    }
+    val small by produceState<ImageBitmap?>(null, bgPath, palette.isDark, palette.accent) {
+        // 没壁纸的时候自己造一张柔光底（小图，放大后就是糊的），卡片才有东西可以糊
+        value = withContext(Dispatchers.IO) {
+            decodeWallpaper(bgPath, 48) ?: makeSoftBackdrop(palette)
+        }
     }
     val bgBmp = full ?: small
 

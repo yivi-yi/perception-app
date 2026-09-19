@@ -77,10 +77,41 @@ object AlarmScheduler {
         }
     }
 
-    /** 开机、或应用启动时，把所有开着的闹钟重新装一遍 */
+    /**
+     * 开机、或应用启动时把所有还没到点的排班重新装一遍。
+     * 以前只装了「闹钟」，日程提醒重启后就丢了，现在两边都装。
+     * 一次性闹钟如果已经过点：5 分钟内算错过、补响一次；更早就直接关掉，别留一个开着却不响的开关。
+     */
     suspend fun rescheduleAll(context: Context) {
         val app = context.applicationContext as? PerceptionApp ?: return
-        app.repository.listByCategory("闹钟").filter { it.remind }.forEach { schedule(context, it) }
+        val now = LocalDateTime.now()
+
+        app.repository.listByCategory("闹钟").filter { it.remind }.forEach { alarm ->
+            if (nextTrigger(alarm, now) != null) {
+                schedule(context, alarm)
+            } else {
+                val at = Instant.ofEpochMilli(alarm.time).atZone(ZoneId.systemDefault()).toLocalDateTime()
+                val lateMinutes = java.time.Duration.between(at, now).toMinutes()
+                if (lateMinutes in 0..5) {
+                    // 刚过点的：补响一次，跟系统闹钟一个脾气
+                    AlarmRingService.start(context, alarm.id, alarm.title.ifBlank { "闹钟" })
+                }
+                app.repository.update(alarm.copy(remind = false))
+            }
+        }
+
+        app.repository.listByCategory("行程").filter { it.remind }.forEach { event ->
+            val at = Instant.ofEpochMilli(event.time).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            if (at.isAfter(now)) schedule(context, event) else app.repository.update(event.copy(remind = false))
+        }
+    }
+
+    /** 清空数据前把所有排班撤掉，不然系统里还挂着"下一个闹钟" */
+    suspend fun cancelAll(context: Context) {
+        val app = context.applicationContext as? PerceptionApp ?: return
+        (app.repository.listByCategory("闹钟") + app.repository.listByCategory("行程"))
+            .filter { it.remind }
+            .forEach { cancel(context, it) }
     }
 
     private fun operation(context: Context, alarm: EventEntity): PendingIntent {

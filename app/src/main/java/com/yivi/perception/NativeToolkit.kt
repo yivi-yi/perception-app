@@ -175,6 +175,9 @@ class NativeToolkit(
         var lng: Double
         var place = ""
 
+        // 默认只给当前天气；传 forecast 才带上未来三天
+        val wantForecast = (source ?: "").equals("forecast", ignoreCase = true)
+
         // 没指定城市就用设置里的默认城市；连默认城市都没有才用定位
         val wanted = city?.takeIf { it.isNotBlank() } ?: settings.weatherCity.value.takeIf { it.isNotBlank() }
 
@@ -208,13 +211,11 @@ class NativeToolkit(
             12000
         )
         val root = jsonObj(text)
-            ?: return@withContext weatherFallback(lat, lng, place)
+            ?: return@withContext weatherFallback(lat, lng, place, wantForecast)
                 ?: mapOf("ok" to false, "error" to "天气接口都没通，检查一下手机能不能上网")
         val cur = root["current"]?.jsonObject
         val daily = root["daily"]?.jsonObject
 
-        // 默认只给当前天气；传 forecast 才带上未来三天
-        val wantForecast = (source ?: "").equals("forecast", ignoreCase = true)
         val days = mutableListOf<Map<String, Any>>()
         val dates = daily?.get("time")?.asArray()
         if (dates != null && wantForecast) {
@@ -246,10 +247,10 @@ class NativeToolkit(
     }
 
     /** 备用天气源：wttr.in，也不用 key */
-    private fun weatherFallback(lat: Double, lng: Double, place: String): Map<String, Any>? {
+    private fun weatherFallback(lat: Double, lng: Double, place: String, wantForecast: Boolean): Map<String, Any>? {
         val root = jsonObj(httpGet("https://wttr.in/$lat,$lng?format=j1", 12000)) ?: return null
         val cur = root["current_condition"]?.asArray()?.firstOrNull()?.jsonObject ?: return null
-        val days = root["weather"]?.asArray()?.take(3)?.map { d ->
+        val days = if (!wantForecast) emptyList() else root["weather"]?.asArray()?.take(3)?.map { d ->
             val o = d.jsonObject
             val noon = o["hourly"].asArray()?.getOrNull(4)?.jsonObject
             mapOf(
@@ -490,7 +491,15 @@ class NativeToolkit(
         }
         val total = (out["current_count"] as? Int ?: 0) + (out["recent_count"] as? Int ?: 0)
         if (total == 0) {
-            return mapOf("ok" to false, "error" to "读不到通知：可能没开通知监听权限，或者两边都是空的")
+            val listenerOn = runCatching {
+                androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context)
+                    .contains(context.packageName)
+            }.getOrDefault(false)
+            return if (!listenerOn) {
+                mapOf("ok" to false, "error" to "读不到通知：没开「通知监听」权限（设置 → 权限 → 通知监听）")
+            } else {
+                out + mapOf("note" to "通知监听是开着的，但两边现在都是空的")
+            }
         }
         return out
     }

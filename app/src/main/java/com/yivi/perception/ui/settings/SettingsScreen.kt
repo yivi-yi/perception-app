@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +98,13 @@ fun SettingsScreen() {
     val logs by settings.logs.collectAsState()
 
     var running by remember { mutableStateOf(PerceptionApp.instance.mcpServer.isRunning) }
+    // 服务到底起没起，以真身为准（端口被占之类起不来时，界面不会骗你）
+    LaunchedEffect(Unit) {
+        while (true) {
+            running = PerceptionApp.instance.mcpServer.isRunning
+            kotlinx.coroutines.delay(1000)
+        }
+    }
     var showTools by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
@@ -111,9 +119,12 @@ fun SettingsScreen() {
     var overlayOk by remember { mutableStateOf(canDrawOverlays(context)) }
     val versionName = remember { appVersion(context) }
 
-    val notifPermission = if (Build.VERSION.SDK_INT >= 33) {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    } else true
+    var notifPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val multiPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -123,7 +134,7 @@ fun SettingsScreen() {
     fun startServer() {
         // 服务要用到的权限顺手一起要：通知（服务常驻）+ 定位（工具盒定位/WiFi 名）+ 活动识别（步数）
         val ask = buildList {
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            add(Manifest.permission.POST_NOTIFICATIONS)
             add(Manifest.permission.ACCESS_FINE_LOCATION)
             add(Manifest.permission.ACCESS_COARSE_LOCATION)
             add(Manifest.permission.ACTIVITY_RECOGNITION)
@@ -132,16 +143,16 @@ fun SettingsScreen() {
             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
         if (ask.isNotEmpty()) multiPermLauncher.launch(ask.toTypedArray())
-        if (!notifPermission && Build.VERSION.SDK_INT >= 33) permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (!notifPermission) permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         val intent = Intent(context, ServerService::class.java).apply { action = ServerService.ACTION_START }
         ContextCompat.startForegroundService(context, intent)
-        running = true
+        running = PerceptionApp.instance.mcpServer.isRunning
     }
 
     fun stopServer() {
         val intent = Intent(context, ServerService::class.java).apply { action = ServerService.ACTION_STOP }
         context.startService(intent)
-        running = false
+        running = PerceptionApp.instance.mcpServer.isRunning
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -155,6 +166,8 @@ fun SettingsScreen() {
                 batteryOk = isIgnoringBattery(context)
                 dndOk = isDndGranted(context)
                 overlayOk = canDrawOverlays(context)
+                notifPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
@@ -470,6 +483,7 @@ fun SettingsScreen() {
                     } catch (_: Exception) {
                     }
                     running = false
+                    runCatching { com.yivi.perception.alarm.AlarmScheduler.cancelAll(context) }
                     PerceptionApp.instance.repository.clearAll()
                     File(context.filesDir, "wallpaper").listFiles()?.forEach { it.delete() }
                     settings.clearAll()

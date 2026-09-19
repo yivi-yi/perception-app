@@ -33,7 +33,7 @@ class PerceptionApp : Application() {
             .fallbackToDestructiveMigration()
             .build()
         repository = PerceptionRepository(database.dao())
-        toolkit = NativeToolkit(this, repository, settings)
+        toolkit = NativeToolkit(this, repository)
         mcpServer = HttpMcpServer(McpEngine(toolkit, settings))
 
         // 每次启动把闹钟重新排一遍：换过手机时间、被杀过、升过级，都能自动接上

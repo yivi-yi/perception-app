@@ -109,8 +109,6 @@ fun SettingsScreen() {
     var editName by remember { mutableStateOf(false) }
     var pickAnnivDate by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
-    var editNcm by remember { mutableStateOf(false) }
-    val ncmBase by settings.ncmBase.collectAsState()
     var showUsage by remember { mutableStateOf(false) }
     var showStatement by remember { mutableStateOf(false) }
     val bootStart by settings.bootStart.collectAsState()
@@ -300,23 +298,6 @@ fun SettingsScreen() {
                     }
                     Text("${ToolCatalog.tools.size} 个", color = palette.accent, fontSize = 12.sp)
                 }
-                ThinDivider()
-                Row(
-                    Modifier.fillMaxWidth().clickable { editNcm = true }.padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("网易云 API（可选）", color = palette.text, fontSize = 14.sp)
-                        Text(
-                            if (ncmBase.isBlank()) "不填也能点歌：搜歌走网易云的公开接口；自己跑了 NeteaseCloudMusicApi 就填上更稳"
-                            else ncmBase,
-                            color = palette.textDim,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 3.dp)
-                        )
-                    }
-                    Text(if (ncmBase.isBlank()) "可填" else "改", color = palette.accent, fontSize = 12.sp)
-                }
             }
         }
 
@@ -455,16 +436,6 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(120.dp))
-    }
-
-    if (editNcm) {
-        TextInputDialog(
-            title = "网易云 API 地址",
-            initial = ncmBase,
-            placeholder = "http://192.168.1.251:3000",
-            onDismiss = { editNcm = false },
-            onSave = { settings.setNcmBase(it.trim()); editNcm = false }
-        )
     }
 
     if (showUsage) {

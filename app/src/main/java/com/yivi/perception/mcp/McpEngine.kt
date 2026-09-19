@@ -89,13 +89,22 @@ class McpEngine(
         tool("installed_apps", "列出这台手机上已安装、能启动的应用（名字 + 包名）。"),
         // 手机状态
         tool("current_app", "这台手机现在前台是哪个应用，返回应用名和包名（要开无障碍权限）。"),
-        tool("read_notifications", "读这台手机通知栏里的通知：优先给现在挂着的，没有就给最近收到的（要开通知监听权限）。"),
+        tool(
+            "read_notifications", "读这台手机的通知，两路互不覆盖，要开通知监听权限。",
+            str("kind", "current=只看通知栏现在挂着的 / recent=只看最近收到的；不传两个都返回"),
+            num("limit", "每类最多几条，默认 20，最多 20")
+        ),
         tool("ambient", "录 3 秒环境音，估一个分贝值，判断安静还是吵、像不像有人在说话（要麦克风权限）。"),
         // 点歌
         tool(
-            "play_song", "在这台手机上打开网易云的这首歌：先搜歌名拿到歌曲 id，再跳本机网易云的歌曲页。搜索走网易云自己的公开接口，不用额外配置；搜不到就打开搜索页让用户自己点。",
-            reqStr("song", "歌名"),
-            str("artist", "歌手，可空；带上更准")
+            "search_song", "搜歌，返回歌名、歌手、专辑和歌曲 id（id 交给 play_song）。这是公开接口，不用配任何东西。",
+            reqStr("keyword", "歌名，或者「歌名 歌手」"),
+            num("limit", "返回几条，默认 5，最多 10")
+        ),
+        tool(
+            "play_song", "按歌曲 id 在这台手机上打开网易云的那首歌。id 要用 search_song 先搜出来。",
+            reqNum("id", "歌曲 id，来自 search_song"),
+            str("name", "歌名，可空，只用来回话时念一下")
         )
     )
 
@@ -208,9 +217,10 @@ class McpEngine(
             "open_app" -> toolkit.openApp(s("packageName") ?: "")
             "installed_apps" -> toolkit.installedApps()
             "current_app" -> toolkit.currentApp()
-            "read_notifications" -> toolkit.notifications()
+            "read_notifications" -> toolkit.notifications(s("kind"), (l("limit") ?: 20L).toInt())
             "ambient" -> toolkit.ambient()
-            "play_song" -> toolkit.playSong(s("song") ?: "", s("artist"))
+            "search_song" -> toolkit.searchSong(s("keyword") ?: "", (l("limit") ?: 5L).toInt())
+            "play_song" -> toolkit.playSong(l("id") ?: -1L, s("name") ?: "")
             else -> mapOf("ok" to false, "error" to "没有这个工具：$name")
         }
 

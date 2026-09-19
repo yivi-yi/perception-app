@@ -18,7 +18,6 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.yivi.perception.alarm.AlarmScheduler
-import com.yivi.perception.data.SettingsRepository
 import com.yivi.perception.data.repo.PerceptionRepository
 import com.yivi.perception.service.NotificationListener
 import com.yivi.perception.service.PermissionService
@@ -43,8 +42,7 @@ import kotlin.math.ln
 
 class NativeToolkit(
     private val context: Context,
-    private val repo: PerceptionRepository,
-    private val settings: SettingsRepository
+    private val repo: PerceptionRepository
 ) {
 
     // ── 设备 ────────────────────────────────────────
@@ -450,20 +448,33 @@ class NativeToolkit(
         return mapOf("ok" to true, "app" to appLabel(pkg), "package" to pkg)
     }
 
-    /** 通知栏里现在挂着什么（要通知监听） */
-    fun notifications(): Map<String, Any> {
-        val active = NotificationListener.active()
-        if (active.isNotEmpty()) {
-            return mapOf("ok" to true, "source" to "通知栏现在挂着的", "count" to active.size, "items" to active)
+    /**
+     * 读通知，两路互不覆盖：
+     * kind=current 只看通知栏现在挂着的 / recent 只看最近收到的 / 其它（空、both）两边都给。
+     * limit 每类最多几条，默认 20，最多 20。
+     */
+    fun notifications(kind: String?, limit: Int): Map<String, Any> {
+        val k = (kind ?: "").lowercase()
+        val n = limit.coerceIn(1, NotificationListener.MAX)
+        val wantCurrent = k != "recent"
+        val wantRecent = k != "current"
+
+        val out = mutableMapOf<String, Any>("ok" to true)
+        if (wantCurrent) {
+            val current = NotificationListener.active(n)
+            out["current"] = current
+            out["current_count"] = current.size
         }
-        val history = synchronized(NotificationListener.lastNotifications) {
-            NotificationListener.lastNotifications.toList()
+        if (wantRecent) {
+            val recent = NotificationListener.recent().takeLast(n)
+            out["recent"] = recent
+            out["recent_count"] = recent.size
         }
-        return if (history.isEmpty()) {
-            mapOf("ok" to false, "error" to "没开通知监听，或者最近没有新通知")
-        } else {
-            mapOf("ok" to true, "source" to "最近收到的（最多20条）", "count" to history.size, "items" to history)
+        val total = (out["current_count"] as? Int ?: 0) + (out["recent_count"] as? Int ?: 0)
+        if (total == 0) {
+            return mapOf("ok" to false, "error" to "读不到通知：可能没开通知监听权限，或者两边都是空的")
         }
+        return out
     }
 
     /** 录 3 秒环境音，估算分贝和是不是有人声 */
@@ -516,72 +527,51 @@ class NativeToolkit(
 
     // ── 点歌：查网易云 API 拿 id，再跳本机网易云 ────────────
 
-    suspend fun playSong(song: String, artist: String?): Map<String, Any> = withContext(Dispatchers.IO) {
-        if (song.isBlank()) return@withContext mapOf("ok" to false, "error" to "要传歌名")
-        val keyword = if (artist.isNullOrBlank()) song else "$song $artist"
-
-        val found = searchNetEase(keyword)
-        if (found == null) {
-            // 搜不到就退化成打开搜索页，至少能自己点
-            val url = "https://music.163.com/#/search/m/?s=${encode(keyword)}"
-            val opened = try {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                true
-            } catch (e: Exception) {
-                false
-            }
-            return@withContext mapOf(
-                "ok" to opened,
-                "mode" to "search",
-                "note" to "没搜到这首歌，只在网易云里打开了搜索页"
-            )
-        }
-
-        val (id, label) = found
-        val opened = openNetEase(id, keyword)
-        mapOf(
-            "ok" to opened,
-            "mode" to "song",
-            "song" to label,
-            "id" to id,
-            "opened" to opened,
-            "note" to if (opened) "已经跳本机网易云了" else "本机没装网易云，也没打开网页"
-        )
-    }
-
-    /**
-     * 搜歌拿 id。优先用网易云自己的公开搜索接口（不用 key、不用自己跑项目），
-     * 不通再用自己配的 NeteaseCloudMusicApi 地址。
-     */
-    private fun searchNetEase(keyword: String): Pair<Long, String>? {
-        val direct = httpGet(
-            "https://music.163.com/api/search/get/web?s=${encode(keyword)}&type=1&limit=1",
+    /** 搜歌：返回歌名 + 歌手 + 专辑 + 歌曲 id（id 交给 play_song 用） */
+    suspend fun searchSong(keyword: String, limit: Int): Map<String, Any> = withContext(Dispatchers.IO) {
+        if (keyword.isBlank()) return@withContext mapOf("ok" to false, "error" to "要传歌名，或者歌名加歌手")
+        val n = limit.coerceIn(1, 10)
+        val text = httpGet(
+            "https://music.163.com/api/search/get/web?s=${encode(keyword)}&type=1&limit=$n",
             10000,
             mapOf("Referer" to "https://music.163.com/")
         )
-        parseSong(direct)?.let { return it }
-
-        val base = settings.ncmBase.value.trim().trimEnd('/')
-        if (base.isNotBlank()) {
-            parseSong(httpGet("$base/search?keywords=${encode(keyword)}&limit=1&type=1", 10000))?.let { return it }
+        val root = jsonObj(text)
+            ?: return@withContext mapOf("ok" to false, "error" to "搜歌接口没通，检查手机能不能上网")
+        val array = root["result"]?.jsonObject?.get("songs")?.asArray()
+        if (array.isNullOrEmpty()) {
+            return@withContext mapOf("ok" to false, "error" to "没搜到：$keyword")
         }
-        return null
+        val songs = array.take(n).map { item ->
+            val o = item.jsonObject
+            mapOf(
+                "id" to (o["id"].numOrNull()?.toLong() ?: 0L),
+                "name" to (o["name"].strOrNull() ?: ""),
+                "artist" to (o["artists"].asArray()?.joinToString("/") { it.jsonObject["name"].strOrNull() ?: "" } ?: ""),
+                "album" to (o["album"]?.jsonObject?.get("name").strOrNull() ?: "")
+            )
+        }
+        mapOf("ok" to true, "keyword" to keyword, "count" to songs.size, "songs" to songs)
     }
 
-    private fun parseSong(text: String?): Pair<Long, String>? {
-        val root = jsonObj(text) ?: return null
-        val song = root["result"]?.jsonObject?.get("songs")?.asArray()?.firstOrNull()?.jsonObject ?: return null
-        val id = song["id"].numOrNull()?.toLong() ?: return null
-        val name = song["name"].strOrNull() ?: ""
-        val singer = song["artists"].asArray()?.joinToString("/") { it.jsonObject["name"].strOrNull() ?: "" } ?: ""
-        return id to listOf(name, singer).filter { it.isNotBlank() }.joinToString(" - ")
+    /** 点歌：按 id 跳本机网易云的歌曲页 */
+    suspend fun playSong(id: Long, name: String): Map<String, Any> = withContext(Dispatchers.IO) {
+        if (id <= 0L) {
+            return@withContext mapOf("ok" to false, "error" to "要传歌曲 id：先用 search_song 搜出 id")
+        }
+        val opened = openNetEase(id)
+        mapOf(
+            "ok" to opened,
+            "id" to id,
+            "name" to name,
+            "note" to if (opened) "已经跳本机网易云了" else "没打开：本机可能没装网易云，网页也没能打开"
+        )
     }
 
-    private fun openNetEase(id: Long, keyword: String): Boolean {
+    private fun openNetEase(id: Long): Boolean {
         val tries = listOf(
             "orpheus://song/$id",
-            "https://music.163.com/song?id=$id",
-            "https://music.163.com/#/search/m/?s=${encode(keyword)}"
+            "https://music.163.com/song?id=$id"
         )
         for (uri in tries) {
             try {

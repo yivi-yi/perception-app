@@ -18,6 +18,7 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.yivi.perception.alarm.AlarmScheduler
+import com.yivi.perception.data.SettingsRepository
 import com.yivi.perception.data.repo.PerceptionRepository
 import com.yivi.perception.service.NotificationListener
 import com.yivi.perception.service.PermissionService
@@ -42,7 +43,8 @@ import kotlin.math.ln
 
 class NativeToolkit(
     private val context: Context,
-    private val repo: PerceptionRepository
+    private val repo: PerceptionRepository,
+    private val settings: SettingsRepository
 ) {
 
     // ── 设备 ────────────────────────────────────────
@@ -64,17 +66,16 @@ class NativeToolkit(
         mapOf("ok" to true, "level" to level, "charging" to charging)
     }
 
+    @Suppress("DEPRECATION")
     suspend fun network(): Map<String, Any> = withContext(Dispatchers.IO) {
         try {
             val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
-            @Suppress("DEPRECATION")
             val info = runCatching { wm.connectionInfo }.getOrNull()
             val ssid = info?.ssid?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
             mapOf(
                 "ok" to true,
                 "ssid" to (ssid ?: "读不到 WiFi 名（安卓 10 以上要定位权限）"),
                 "rssi" to (info?.rssi ?: 0),
-                @Suppress("DEPRECATION")
                 "ip" to android.text.format.Formatter.formatIpAddress(info?.ipAddress ?: 0)
             )
         } catch (e: Exception) {
@@ -147,10 +148,10 @@ class NativeToolkit(
         null
     }
 
+    @Suppress("DEPRECATION")
     private fun reverseGeocode(lat: Double, lng: Double): String {
         try {
             val geocoder = Geocoder(context, Locale.getDefault())
-            @Suppress("DEPRECATION")
             val list = geocoder.getFromLocation(lat, lng, 1)
             val addr = list?.firstOrNull()?.let { a ->
                 listOfNotNull(a.adminArea, a.locality, a.subLocality, a.thoroughfare, a.subThoroughfare)
@@ -178,22 +179,25 @@ class NativeToolkit(
         var lng: Double
         var place = ""
 
-        if (!city.isNullOrBlank()) {
+        // 没指定城市就用设置里的默认城市；连默认城市都没有才用定位
+        val wanted = city?.takeIf { it.isNotBlank() } ?: settings.weatherCity.value.takeIf { it.isNotBlank() }
+
+        if (wanted != null) {
             val geo = jsonObj(
                 httpGet(
-                    "https://geocoding-api.open-meteo.com/v1/search?name=${encode(city)}&count=1&language=zh&format=json",
+                    "https://geocoding-api.open-meteo.com/v1/search?name=${encode(wanted)}&count=1&language=zh&format=json",
                     10000
                 )
             )
             val first = geo?.get("results")?.asArray()?.firstOrNull()?.jsonObject
-                ?: return@withContext mapOf("ok" to false, "error" to "找不到城市「$city」")
+                ?: return@withContext mapOf("ok" to false, "error" to "找不到城市「$wanted」")
             lat = first["latitude"].numOrNull() ?: return@withContext mapOf("ok" to false, "error" to "城市坐标没拿到")
             lng = first["longitude"].numOrNull() ?: 0.0
             place = listOfNotNull(first["name"].strOrNull(), first["admin1"].strOrNull()).distinct().joinToString(" ")
         } else {
             val fix = lastFix() ?: return@withContext mapOf(
                 "ok" to false,
-                "error" to "没给城市、也没定位过：要么传 city，要么先把定位权限和定位打开"
+                "error" to "没传城市、设置里也没有默认城市、又定位不到：三个里给一个就行"
             )
             lat = fix.first
             lng = fix.second
@@ -478,6 +482,7 @@ class NativeToolkit(
     }
 
     /** 录 3 秒环境音，估算分贝和是不是有人声 */
+    @Suppress("DEPRECATION")
     suspend fun ambient(): Map<String, Any> = withContext(Dispatchers.IO) {
         if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
             return@withContext mapOf("ok" to false, "error" to "没给麦克风权限")

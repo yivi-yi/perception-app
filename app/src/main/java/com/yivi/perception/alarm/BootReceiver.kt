@@ -14,10 +14,10 @@ import kotlinx.coroutines.launch
 class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        val action = intent.action ?: return
-        if (action != Intent.ACTION_BOOT_COMPLETED &&
-            action != "android.intent.action.QUICKBOOT_POWERON" &&
-            action != "com.htc.intent.action.QUICKBOOT_POWERON"
+        val arrived = intent.action ?: return
+        if (arrived != Intent.ACTION_BOOT_COMPLETED &&
+            arrived != "android.intent.action.QUICKBOOT_POWERON" &&
+            arrived != "com.htc.intent.action.QUICKBOOT_POWERON"
         ) return
 
         val app = context.applicationContext as? PerceptionApp ?: return
@@ -25,7 +25,7 @@ class BootReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 if (app.settings.bootStart.value) {
-                    val svc = Intent(context, ServerService::class.java).apply { action = ServerService.ACTION_START }
+                    val svc = Intent(context, ServerService::class.java).apply { setAction(ServerService.ACTION_START) }
                     try {
                         ContextCompat.startForegroundService(context, svc)
                     } catch (_: Exception) {

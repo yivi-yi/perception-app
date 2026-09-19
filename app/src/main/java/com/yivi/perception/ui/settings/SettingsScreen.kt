@@ -48,9 +48,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +73,7 @@ import com.yivi.perception.data.ToolCatalog
 import com.yivi.perception.service.NetworkUtils
 import com.yivi.perception.service.ServerService
 import com.yivi.perception.ui.common.ActionPill
+import com.yivi.perception.ui.common.ConfirmDialog
 import com.yivi.perception.ui.common.GlassCard
 import com.yivi.perception.ui.common.SectionLabel
 import com.yivi.perception.ui.common.SegRow
@@ -83,7 +84,6 @@ import com.yivi.perception.ui.common.ThinDivider
 import com.yivi.perception.ui.theme.LocalPalette
 import java.io.File
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -109,6 +109,8 @@ fun SettingsScreen() {
     var editName by remember { mutableStateOf(false) }
     var pickAnnivDate by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
+    var editCity by remember { mutableStateOf(false) }
+    val weatherCity by settings.weatherCity.collectAsState()
     var showUsage by remember { mutableStateOf(false) }
     var showStatement by remember { mutableStateOf(false) }
     val bootStart by settings.bootStart.collectAsState()
@@ -183,7 +185,7 @@ fun SettingsScreen() {
         )
 
         Spacer(Modifier.height(16.dp))
-        SectionLabel("𝒯𝒽ℯ𝓂ℯ")
+        SectionLabel("𝒯𝒽ℯ𝓂ℯ", "主题")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(16.dp)) {
@@ -203,7 +205,7 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("ℬ𝒶𝒸𝓀ℊ𝓇ℴ𝓊𝓃𝒹")
+        SectionLabel("ℬ𝒶𝒸𝓀ℊ𝓇ℴ𝓊𝓃𝒹", "背景")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +247,7 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒜𝓃𝓃𝒾𝓋ℯ𝓇𝓈𝒶𝓇𝓎")
+        SectionLabel("𝒜𝓃𝓃𝒾𝓋ℯ𝓇𝓈𝒶𝓇𝓎", "纪念日")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(16.dp)) {
@@ -280,7 +282,30 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒯ℴℴ𝓁𝓈")
+        SectionLabel("𝒲ℯ𝒶𝓉𝒽ℯ𝓇", "天气")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { editCity = true }.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("默认城市", color = palette.text, fontSize = 14.sp)
+                        Text(
+                            if (weatherCity.isBlank()) "不填就用手机定位（要定位权限）" else weatherCity,
+                            color = palette.textDim,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 3.dp)
+                        )
+                    }
+                    Text(if (weatherCity.isBlank()) "去填" else "改", color = palette.accent, fontSize = 12.sp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("𝒯ℴℴ𝓁𝓈", "工具盒")
         Spacer(Modifier.height(8.dp))
         GlassCard(
             modifier = Modifier.fillMaxWidth().clickable { showTools = true },
@@ -302,7 +327,7 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒫ℯ𝓇𝓂𝒾𝓈𝓈𝒾ℴ𝓃")
+        SectionLabel("𝒫ℯ𝓇𝓂𝒾𝓈𝓈𝒾ℴ𝓃", "权限")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -316,7 +341,7 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("ℳ𝒞𝒫 𝒮ℯ𝓇𝓋ℯ𝓇")
+        SectionLabel("ℳ𝒞𝒫 𝒮ℯ𝓇𝓋ℯ𝓇", "服务")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(16.dp)) {
@@ -349,7 +374,7 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒦ℯℯ𝓅 𝒜𝓁𝒾𝓋ℯ")
+        SectionLabel("𝒦ℯℯ𝓅 𝒜𝓁𝒾𝓋ℯ", "保活")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
@@ -392,7 +417,7 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒜𝒷ℴ𝓊𝓉")
+        SectionLabel("𝒜𝒷ℴ𝓊𝓉", "关于")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
@@ -421,7 +446,7 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒟𝒶𝓉𝒶")
+        SectionLabel("𝒟𝒶𝓉𝒶", "数据")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
@@ -436,6 +461,16 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(120.dp))
+    }
+
+    if (editCity) {
+        TextInputDialog(
+            title = "默认城市",
+            initial = weatherCity,
+            placeholder = "广州",
+            onDismiss = { editCity = false },
+            onSave = { settings.setWeatherCity(it); editCity = false }
+        )
     }
 
     if (showUsage) {

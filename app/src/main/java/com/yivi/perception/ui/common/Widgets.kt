@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,9 +18,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,17 +31,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yivi.perception.ui.theme.LocalPalette
 
-/** 花体小标题 */
+/** 小标题：花体英文 + 中文，像 𝒯𝒽ℯ𝓂ℯ 主题 */
 @Composable
-fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+fun SectionLabel(script: String, cn: String? = null, modifier: Modifier = Modifier) {
     val palette = LocalPalette.current
-    Text(
-        text,
-        modifier = modifier.padding(start = 6.dp),
-        fontSize = 12.sp,
-        letterSpacing = 1.sp,
-        color = palette.textLight
-    )
+    Row(
+        modifier.padding(start = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(script, fontSize = 12.5.sp, letterSpacing = 1.sp, color = palette.textLight)
+        if (!cn.isNullOrBlank()) {
+            Spacer(Modifier.width(6.dp))
+            Text(cn, fontSize = 11.sp, color = palette.textDim)
+        }
+    }
 }
 
 @Composable
@@ -50,7 +55,7 @@ fun ThinDivider(modifier: Modifier = Modifier) {
 
 /** 胶囊小按钮，选中是实心主色 */
 @Composable
-fun PillButton(label: String, active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun PillButton(label: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val palette = LocalPalette.current
     Box(
         modifier

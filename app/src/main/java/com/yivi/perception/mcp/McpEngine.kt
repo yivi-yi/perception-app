@@ -77,7 +77,7 @@ class McpEngine(
         tool("location", "这台手机现在在哪，返回经纬度和文字地址。会先试着拿实时定位（最多等 6 秒），拿不到就退回最近一次定位，并用 realtime / age_minutes 告诉你是不是实时的。"),
         tool(
             "weather", "查天气，来自 open-meteo（不用自己配 key）。",
-            str("city", "城市名，如「广州」；不传就用手机当前位置（要定位权限）")
+            str("city", "城市名，如「广州」；不传就用设置里的默认城市，都没有才用手机当前位置（要定位权限）")
         ),
         tool("network", "当前连的 WiFi 名字、信号强度、本机 IP。安卓 10 以上读 WiFi 名需要定位权限。"),
         tool("sensors", "这台手机上有哪些传感器（只是清单）。要读数用 read_sensor。"),

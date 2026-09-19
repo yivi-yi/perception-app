@@ -306,16 +306,16 @@ fun SettingsScreen() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("网易云 API", color = palette.text, fontSize = 14.sp)
+                        Text("网易云 API（可选）", color = palette.text, fontSize = 14.sp)
                         Text(
-                            if (ncmBase.isBlank()) "不填就只有「跳网易云点歌」这个工具用不了"
+                            if (ncmBase.isBlank()) "不填也能点歌：搜歌走网易云的公开接口；自己跑了 NeteaseCloudMusicApi 就填上更稳"
                             else ncmBase,
                             color = palette.textDim,
                             fontSize = 11.sp,
                             modifier = Modifier.padding(top = 3.dp)
                         )
                     }
-                    Text(if (ncmBase.isBlank()) "去填" else "改", color = palette.accent, fontSize = 12.sp)
+                    Text(if (ncmBase.isBlank()) "可填" else "改", color = palette.accent, fontSize = 12.sp)
                 }
             }
         }

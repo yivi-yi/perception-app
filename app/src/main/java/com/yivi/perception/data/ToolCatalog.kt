@@ -19,7 +19,6 @@ object ToolCatalog {
         "open_app" to "按包名打开应用",
         "installed_apps" to "已安装可启动的应用（名字 + 包名）",
         "current_app" to "当前前台应用（名字 + 包名，要无障碍）",
-        "read_screen" to "读当前屏幕上的文字（要无障碍）",
         "read_notifications" to "读通知栏的通知（要通知监听）",
         "ambient" to "录 3 秒环境音，估分贝（要麦克风）",
         "play_song" to "跳本机网易云打开这首歌"

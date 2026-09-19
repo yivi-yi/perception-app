@@ -209,7 +209,9 @@ class NativeToolkit(
                 "&timezone=auto&forecast_days=3",
             12000
         )
-        val root = jsonObj(text) ?: return@withContext mapOf("ok" to false, "error" to "天气接口没返回（检查网络）")
+        val root = jsonObj(text)
+            ?: return@withContext weatherFallback(lat, lng, place)
+                ?: mapOf("ok" to false, "error" to "天气接口都没通，检查一下手机能不能上网")
         val cur = root["current"]?.jsonObject
         val daily = root["daily"]?.jsonObject
 
@@ -238,6 +240,37 @@ class NativeToolkit(
                 "humidity" to (cur?.get("relative_humidity_2m")?.numOrNull() ?: 0.0),
                 "wind" to (cur?.get("wind_speed_10m")?.numOrNull() ?: 0.0),
                 "weather" to weatherText(cur?.get("weather_code")?.numOrNull()?.toInt())
+            ),
+            "days" to days
+        )
+    }
+
+    /** 备用天气源：wttr.in，也不用 key */
+    private fun weatherFallback(lat: Double, lng: Double, place: String): Map<String, Any>? {
+        val root = jsonObj(httpGet("https://wttr.in/$lat,$lng?format=j1", 12000)) ?: return null
+        val cur = root["current_condition"]?.asArray()?.firstOrNull()?.jsonObject ?: return null
+        val days = root["weather"]?.asArray()?.take(3)?.map { d ->
+            val o = d.jsonObject
+            val noon = o["hourly"].asArray()?.getOrNull(4)?.jsonObject
+            mapOf(
+                "date" to (o["date"].strOrNull() ?: ""),
+                "weather" to (noon?.get("weatherDesc").asArray()?.firstOrNull()?.jsonObject?.get("value").strOrNull() ?: ""),
+                "min" to ((o["mintempC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "max" to ((o["maxtempC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "rain_prob" to ((noon?.get("chanceofrain").strOrNull() ?: "0").toDoubleOrNull() ?: 0.0)
+            )
+        } ?: emptyList()
+
+        return mapOf(
+            "ok" to true,
+            "place" to place,
+            "source" to "wttr.in（备用源）",
+            "now" to mapOf(
+                "temp" to ((cur["temp_C"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "feels_like" to ((cur["FeelsLikeC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "humidity" to ((cur["humidity"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "wind" to ((cur["windspeedKmph"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "weather" to (cur["weatherDesc"].asArray()?.firstOrNull()?.jsonObject?.get("value").strOrNull() ?: "")
             ),
             "days" to days
         )
@@ -417,16 +450,6 @@ class NativeToolkit(
         return mapOf("ok" to true, "app" to appLabel(pkg), "package" to pkg)
     }
 
-    /** 现在屏幕上有什么字（要无障碍） */
-    fun readScreen(): Map<String, Any> {
-        val text = PermissionService.dumpScreen()
-        return if (text.isNullOrBlank()) {
-            mapOf("ok" to false, "error" to "没开无障碍，或者当前界面读不到字")
-        } else {
-            mapOf("ok" to true, "text" to text)
-        }
-    }
-
     /** 通知栏里现在挂着什么（要通知监听） */
     fun notifications(): Map<String, Any> {
         val active = NotificationListener.active()
@@ -496,9 +519,10 @@ class NativeToolkit(
     suspend fun playSong(song: String, artist: String?): Map<String, Any> = withContext(Dispatchers.IO) {
         if (song.isBlank()) return@withContext mapOf("ok" to false, "error" to "要传歌名")
         val keyword = if (artist.isNullOrBlank()) song else "$song $artist"
-        val base = settings.ncmBase.value.trim().trimEnd('/')
-        if (base.isBlank()) {
-            // 没配 API 也能用：直接在网易云/浏览器里打开搜索页
+
+        val found = searchNetEase(keyword)
+        if (found == null) {
+            // 搜不到就退化成打开搜索页，至少能自己点
             val url = "https://music.163.com/#/search/m/?s=${encode(keyword)}"
             val opened = try {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -509,26 +533,48 @@ class NativeToolkit(
             return@withContext mapOf(
                 "ok" to opened,
                 "mode" to "search",
-                "note" to "没配网易云 API，只在网易云里打开了搜索页。在设置 → 工具盒 → 网易云 API 里填上地址（如 http://192.168.1.251:3000）就能直接点开那首歌"
+                "note" to "没搜到这首歌，只在网易云里打开了搜索页"
             )
         }
-        val root = jsonObj(httpGet("$base/search?keywords=${encode(keyword)}&limit=1&type=1", 10000))
-            ?: return@withContext mapOf("ok" to false, "error" to "调不到网易云 API（地址不通？）")
-        val first = root["result"]?.jsonObject?.get("songs")?.asArray()?.firstOrNull()?.jsonObject
-            ?: return@withContext mapOf("ok" to false, "error" to "没搜到这首歌：$keyword")
-        val id = first["id"].numOrNull()?.toLong() ?: return@withContext mapOf("ok" to false, "error" to "没拿到歌曲 id")
-        val name = first["name"].strOrNull() ?: song
-        val singer = first["artists"].asArray()?.joinToString("/") { it.jsonObject["name"].strOrNull() ?: "" } ?: ""
 
+        val (id, label) = found
         val opened = openNetEase(id, keyword)
         mapOf(
             "ok" to opened,
-            "song" to name,
-            "artist" to singer,
+            "mode" to "song",
+            "song" to label,
             "id" to id,
             "opened" to opened,
-            "note" to if (opened) "已经跳本机网易云了" else "本机没装网易云，链接没打开"
+            "note" to if (opened) "已经跳本机网易云了" else "本机没装网易云，也没打开网页"
         )
+    }
+
+    /**
+     * 搜歌拿 id。优先用网易云自己的公开搜索接口（不用 key、不用自己跑项目），
+     * 不通再用自己配的 NeteaseCloudMusicApi 地址。
+     */
+    private fun searchNetEase(keyword: String): Pair<Long, String>? {
+        val direct = httpGet(
+            "https://music.163.com/api/search/get/web?s=${encode(keyword)}&type=1&limit=1",
+            10000,
+            mapOf("Referer" to "https://music.163.com/")
+        )
+        parseSong(direct)?.let { return it }
+
+        val base = settings.ncmBase.value.trim().trimEnd('/')
+        if (base.isNotBlank()) {
+            parseSong(httpGet("$base/search?keywords=${encode(keyword)}&limit=1&type=1", 10000))?.let { return it }
+        }
+        return null
+    }
+
+    private fun parseSong(text: String?): Pair<Long, String>? {
+        val root = jsonObj(text) ?: return null
+        val song = root["result"]?.jsonObject?.get("songs")?.asArray()?.firstOrNull()?.jsonObject ?: return null
+        val id = song["id"].numOrNull()?.toLong() ?: return null
+        val name = song["name"].strOrNull() ?: ""
+        val singer = song["artists"].asArray()?.joinToString("/") { it.jsonObject["name"].strOrNull() ?: "" } ?: ""
+        return id to listOf(name, singer).filter { it.isNotBlank() }.joinToString(" - ")
     }
 
     private fun openNetEase(id: Long, keyword: String): Boolean {
@@ -620,11 +666,19 @@ class NativeToolkit(
 
     private fun encode(s: String): String = URLEncoder.encode(s, "UTF-8")
 
-    private fun httpGet(url: String, timeoutMs: Int = 10000): String? = try {
+    private fun httpGet(
+        url: String,
+        timeoutMs: Int = 10000,
+        headers: Map<String, String> = emptyMap()
+    ): String? = try {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
-        conn.setRequestProperty("User-Agent", "Perception/1.0")
+        conn.setRequestProperty(
+            "User-Agent",
+            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36"
+        )
+        headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
         conn.inputStream.bufferedReader().use { it.readText() }
     } catch (e: Exception) {
         null

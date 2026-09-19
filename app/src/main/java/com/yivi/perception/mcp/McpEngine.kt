@@ -90,7 +90,9 @@ class McpEngine(
                     })
                 }
             })
-            val required = props.filter { it.name == "id" || (it.name == "title" && name.startsWith("add")) }
+            val required = props.filter {
+                it.name == "id" || it.name == "packageName" || (it.name == "title" && name == "add_schedule")
+            }
             if (required.isNotEmpty()) {
                 put("required", JsonArray(required.map { JsonPrimitive(it.name) }))
             }

@@ -171,7 +171,7 @@ class AlarmRingService : Service() {
 
     private fun buildNotification(title: String): Notification {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        run {
             val channel = NotificationChannel(CHANNEL_ID, "闹钟", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "闹钟到点提醒"
                 setSound(null, null)
@@ -212,10 +212,5 @@ class AlarmRingService : Service() {
             .build()
     }
 
-    private fun piFlags(): Int =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
+    private fun piFlags(): Int = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 }

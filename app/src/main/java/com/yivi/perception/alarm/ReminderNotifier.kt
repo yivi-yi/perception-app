@@ -23,19 +23,14 @@ object ReminderNotifier {
 
     fun show(context: Context, event: EventEntity) {
         val manager = NotificationManagerCompat.from(context)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "日程提醒", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "日程到点提醒"
-            }
-            (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)
-                ?.createNotificationChannel(channel)
-        }
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)
+            ?.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "日程提醒", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "日程到点提醒"
+                }
+            )
 
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val open = PendingIntent.getActivity(
             context, event.id.toInt(), Intent(context, MainActivity::class.java), flags
         )

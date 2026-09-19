@@ -85,23 +85,13 @@ fun GlassCard(
                         val offY = (h - dh) / 2f
                         val baseX = offX - pos.x
                         val baseY = offY - pos.y
-                        val size = IntSize(dw.roundToInt(), dh.roundToInt())
-                        // 小图放大一次不够细，错位叠几层把像素感抹平（就是便宜的模糊）
-                        val taps = listOf(
-                            0f to 0f, 2.5f to 0f, -2.5f to 0f, 0f to 2.5f, 0f to -2.5f
+                        // 安卓 12+ 上面那层 Modifier.blur 是真高斯，这里只要把图对齐画进去就行
+                        drawImage(
+                            image = img,
+                            dstOffset = IntOffset(baseX.roundToInt(), baseY.roundToInt()),
+                            dstSize = IntSize(dw.roundToInt(), dh.roundToInt()),
+                            filterQuality = FilterQuality.Low
                         )
-                        taps.forEach { (dx, dy) ->
-                            drawImage(
-                                image = img,
-                                dstOffset = IntOffset(
-                                    (baseX + dx * density).roundToInt(),
-                                    (baseY + dy * density).roundToInt()
-                                ),
-                                dstSize = size,
-                                alpha = 1f,
-                                filterQuality = FilterQuality.Low
-                            )
-                        }
                     }
             )
         }

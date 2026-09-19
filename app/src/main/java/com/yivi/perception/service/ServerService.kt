@@ -86,17 +86,12 @@ class ServerService : Service() {
         val stopIntent = android.app.PendingIntent.getService(
             this, 99,
             Intent(this, ServerService::class.java).setAction(ACTION_STOP),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-            } else {
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT
-            }
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel("perception_server", "Perception 服务", NotificationManager.IMPORTANCE_LOW)
-            manager.createNotificationChannel(channel)
-        }
+        manager.createNotificationChannel(
+            NotificationChannel("perception_server", "Perception 服务", NotificationManager.IMPORTANCE_LOW)
+        )
         val notification: Notification = NotificationCompat.Builder(this, "perception_server")
             .setContentTitle("Perception · MCP 服务运行中")
             .setContentText("局域网地址 http://${NetworkUtils.localIp()}:$PORT/mcp（点通知可回到 APP）")
@@ -105,11 +100,7 @@ class ServerService : Service() {
             .setContentIntent(
                 android.app.PendingIntent.getActivity(
                     this, 100, Intent(this, MainActivity::class.java),
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-                    } else {
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT
-                    }
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                 )
             )
             .addAction(0, "停止服务", stopIntent)

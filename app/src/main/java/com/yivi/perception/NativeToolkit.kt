@@ -15,7 +15,6 @@ import android.media.MediaRecorder
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.yivi.perception.alarm.AlarmScheduler
 import com.yivi.perception.data.SettingsRepository
@@ -95,14 +94,12 @@ class NativeToolkit(
 
         var loc: Location? = null
         var realtime = false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
-                val got = currentLocation(lm, provider)
-                if (got != null) {
-                    loc = got
-                    realtime = true
-                    break
-                }
+        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
+            val got = currentLocation(lm, provider)
+            if (got != null) {
+                loc = got
+                realtime = true
+                break
             }
         }
         if (loc == null) {
@@ -130,7 +127,6 @@ class NativeToolkit(
         )
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
     private fun currentLocation(lm: LocationManager, provider: String): Location? = try {
         if (lm.getProvider(provider) == null) {
             null
@@ -286,13 +282,11 @@ class NativeToolkit(
         ) return@withContext null
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return@withContext null
         var loc: Location? = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
-                val got = currentLocation(lm, provider)
-                if (got != null) {
-                    loc = got
-                    break
-                }
+        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
+            val got = currentLocation(lm, provider)
+            if (got != null) {
+                loc = got
+                break
             }
         }
         if (loc == null) {
@@ -395,7 +389,7 @@ class NativeToolkit(
             }
         }
         if (kind == "all" || kind == "steps") {
-            if (!hasPermission(Manifest.permission.ACTIVITY_RECOGNITION) && Build.VERSION.SDK_INT >= 29) {
+            if (!hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)) {
                 out["steps"] = "没给活动识别权限，读不了步数"
             } else {
                 val v = readOnce(sm, Sensor.TYPE_STEP_COUNTER)
@@ -510,7 +504,7 @@ class NativeToolkit(
         var recorder: MediaRecorder? = null
         try {
             val file = File(context.cacheDir, "ambient_${System.currentTimeMillis()}.m4a")
-            val r = MediaRecorder()
+            val r = MediaRecorder(context)
             recorder = r
             r.setAudioSource(MediaRecorder.AudioSource.MIC)
             r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)

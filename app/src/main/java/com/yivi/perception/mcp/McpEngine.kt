@@ -87,12 +87,12 @@ class McpEngine(
         ),
         tool("open_app", "在这台手机上打开一个应用。", reqStr("packageName", "应用包名，如 com.tencent.mm；用 installed_apps 拿")),
         tool("installed_apps", "列出这台手机上已安装、能启动的应用（名字 + 包名）。"),
-        tool("sound_state", "看这台手机现在的铃声模式（响铃 / 震动 / 静音）、有没有开勿扰，以及媒体 / 铃声 / 通知 / 闹钟四路音量（百分比）。"),
+        tool("sound_state", "看这台手机现在的铃声模式（响铃 / 震动 / 静音）、有没有开勿扰，以及媒体 / 铃声 / 通知 / 闹钟四路音量（0-100 的百分比）。改之前先看这个就知道现在多大。"),
         tool(
-            "set_sound", "改这台手机的铃声模式或音量。",
-            str("mode", "normal=响铃 / vibrate=震动 / silent=静音 / dnd=开勿扰（勿扰要单独授权）"),
-            num("level", "音量百分比 0-100，配合 stream 用"),
-            str("stream", "改哪一路音量：music（默认）/ ring / notification / alarm")
+            "set_sound", "改这台手机的铃声模式或音量，改完会返回现在的状态。只传要改的那个就行。",
+            str("mode", "normal=响铃 / vibrate=震动 / silent=静音 / dnd=开勿扰（勿扰要手机先给「勿扰权限」，没给会提示去开）"),
+            num("level", "音量百分比 0-100（不是原始档位），配合 stream 用"),
+            str("stream", "改哪一路音量：music 媒体（默认）/ ring 铃声 / notification 通知 / alarm 闹钟")
         ),
         // 手机状态
         tool("current_app", "这台手机现在前台是哪个应用，返回应用名和包名（要开无障碍权限）。"),

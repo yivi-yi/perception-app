@@ -94,7 +94,11 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
     }
 
     suspend fun addSchedule(title: String, note: String, time: Long, remind: Boolean): Map<String, Any> {
-        val id = repo.add(com.yivi.perception.data.db.EventEntity(category = "行程", title = title, note = note, time = time, remind = remind))
+        val event = com.yivi.perception.data.db.EventEntity(
+            category = "行程", title = title, note = note, time = time, remind = remind
+        )
+        val id = repo.add(event)
+        if (remind) AlarmScheduler.schedule(context, event.copy(id = id))
         return mapOf("ok" to true, "id" to id, "category" to "行程")
     }
 
@@ -125,10 +129,8 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
             repeatDays = repeatDays ?: item.repeatDays
         )
         repo.update(updated)
-        if (updated.category == "闹钟") {
-            AlarmScheduler.cancel(context, item)
-            if (updated.remind) AlarmScheduler.schedule(context, updated)
-        }
+        AlarmScheduler.cancel(context, item)
+        if (updated.remind) AlarmScheduler.schedule(context, updated)
         return mapOf("ok" to true, "id" to id)
     }
 

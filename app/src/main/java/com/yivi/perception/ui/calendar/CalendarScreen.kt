@@ -4,6 +4,11 @@ package com.yivi.perception.ui.calendar
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +45,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yivi.perception.PerceptionApp
 import com.yivi.perception.data.db.EventEntity
@@ -64,10 +71,16 @@ private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
 
 @Composable
 fun CalendarScreen(
-    vm: CalendarViewModel = viewModel(factory = CalendarViewModel.Factory(PerceptionApp.instance.repository))
+    vm: CalendarViewModel = viewModel(
+        factory = CalendarViewModel.Factory(
+            PerceptionApp.instance.repository,
+            PerceptionApp.instance.applicationContext
+        )
+    )
 ) {
     val palette = LocalPalette.current
     val settings = PerceptionApp.instance.settings
+    val context = LocalContext.current
     val events by vm.events.collectAsState()
     val annivText by settings.annivText.collectAsState()
     val annivType by settings.annivType.collectAsState()
@@ -78,6 +91,7 @@ fun CalendarScreen(
     var showAnniv by remember { mutableStateOf(false) }
     var editingAnniv by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<EventEntity?>(null) }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     val dayList = events.filter { sameDay(it.time, selected) }
     val marked = remember(events) { events.mapNotNull { millisToDate(it.time) }.toSet() }
@@ -140,7 +154,16 @@ fun CalendarScreen(
         ScheduleDialog(
             initialDate = selected,
             onDismiss = { showAdd = false },
-            onSave = { vm.add(it); showAdd = false }
+            onSave = { e ->
+                vm.add(e)
+                // 开了提醒但还没给通知权限，顺手要一下，不然到点静悄悄
+                if (e.remind && Build.VERSION.SDK_INT >= 33 &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                showAdd = false
+            }
         )
     }
 
@@ -170,7 +193,7 @@ fun CalendarScreen(
         ConfirmDialog(
             title = "删除日程",
             text = "「${e.title}」删掉就没了，确定吗？",
-            onConfirm = { vm.delete(e.id); pendingDelete = null },
+            onConfirm = { vm.delete(e); pendingDelete = null },
             onDismiss = { pendingDelete = null }
         )
     }

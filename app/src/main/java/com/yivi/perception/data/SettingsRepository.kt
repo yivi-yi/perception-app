@@ -30,6 +30,9 @@ class SettingsRepository(context: Context) {
     private val _bootStart = MutableStateFlow(prefs.getBoolean("bootStart", true))
     val bootStart: StateFlow<Boolean> get() = _bootStart
 
+    private val _noticeAgreed = MutableStateFlow(prefs.getBoolean("noticeAgreed", false))
+    val noticeAgreed: StateFlow<Boolean> get() = _noticeAgreed
+
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> get() = _logs
 
@@ -39,6 +42,8 @@ class SettingsRepository(context: Context) {
     fun setAnnivText(v: String) { _annivText.value = v; prefs.edit().putString("annivText", v).apply() }
     fun setAnnivType(v: String) { _annivType.value = v; prefs.edit().putString("annivType", v).apply() }
     fun setAnnivDate(v: Long) { _annivDate.value = v; prefs.edit().putLong("annivDate", v).apply() }
+    fun setNoticeAgreed(v: Boolean) { _noticeAgreed.value = v; prefs.edit().putBoolean("noticeAgreed", v).apply() }
+
     fun setBootStart(v: Boolean) { _bootStart.value = v; prefs.edit().putBoolean("bootStart", v).apply() }
 
     /** 恢复出厂：设置项全回到默认（壁纸文件由界面那边删） */
@@ -51,6 +56,8 @@ class SettingsRepository(context: Context) {
         _annivType.value = "正数"
         _annivDate.value = 0L
         _bootStart.value = true
+        _noticeAgreed.value = true   // 清数据不用再看一遍声明
+        prefs.edit().putBoolean("noticeAgreed", true).apply()
         _logs.value = emptyList()
     }
 

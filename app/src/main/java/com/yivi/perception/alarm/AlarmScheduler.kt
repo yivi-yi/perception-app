@@ -23,7 +23,7 @@ object AlarmScheduler {
     const val EXTRA_ID = "alarm_id"
     const val EXTRA_TITLE = "alarm_title"
 
-    /** 下一次该响的时间；不会再响（一次性且已经过）返回 null */
+    /** 下一次该响/该提醒的时间；不会再响（一次性且已经过）返回 null */
     fun nextTrigger(alarm: EventEntity, now: LocalDateTime = LocalDateTime.now()): LocalDateTime? {
         val time: LocalTime = Instant.ofEpochMilli(alarm.time).atZone(ZoneId.systemDefault()).toLocalTime()
         val days = alarm.repeatDays.split(",").mapNotNull { it.trim().toIntOrNull() }.filter { it in 1..7 }
@@ -47,14 +47,19 @@ object AlarmScheduler {
         val trigger = nextTrigger(alarm) ?: run { cancel(context, alarm); return }
         val millis = trigger.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val showIntent = PendingIntent.getActivity(
-            context,
-            alarm.id.toInt(),
-            Intent(context, MainActivity::class.java),
-            flags()
-        )
         try {
-            am.setAlarmClock(AlarmManager.AlarmClockInfo(millis, showIntent), operation(context, alarm))
+            if (alarm.category == "闹钟") {
+                val showIntent = PendingIntent.getActivity(
+                    context,
+                    alarm.id.toInt(),
+                    Intent(context, MainActivity::class.java),
+                    flags()
+                )
+                am.setAlarmClock(AlarmManager.AlarmClockInfo(millis, showIntent), operation(context, alarm))
+            } else {
+                // 日程提醒：准点叫一次就行，不用占系统"下一个闹钟"的位置
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, millis, operation(context, alarm))
+            }
         } catch (e: SecurityException) {
             // 没给"精确闹钟"权限就退回普通闹钟，一样会响，只是可能不差秒
             try {

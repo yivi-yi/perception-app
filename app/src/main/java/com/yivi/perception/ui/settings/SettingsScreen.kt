@@ -76,7 +76,9 @@ import com.yivi.perception.ui.common.ActionPill
 import com.yivi.perception.ui.common.GlassCard
 import com.yivi.perception.ui.common.SectionLabel
 import com.yivi.perception.ui.common.SegRow
+import com.yivi.perception.ui.common.StatementDialog
 import com.yivi.perception.ui.common.TextInputDialog
+import com.yivi.perception.ui.common.UsageDialog
 import com.yivi.perception.ui.common.ThinDivider
 import com.yivi.perception.ui.theme.LocalPalette
 import java.io.File
@@ -107,6 +109,8 @@ fun SettingsScreen() {
     var editName by remember { mutableStateOf(false) }
     var pickAnnivDate by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
+    var showUsage by remember { mutableStateOf(false) }
+    var showStatement by remember { mutableStateOf(false) }
     val bootStart by settings.bootStart.collectAsState()
     val scope = rememberCoroutineScope()
     var batteryOk by remember { mutableStateOf(isIgnoringBattery(context)) }
@@ -365,10 +369,24 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒟𝒶𝓉𝒶")
+        SectionLabel("𝒜𝒷ℴ𝓊𝓉")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                JumpRow(
+                    title = "使用说明",
+                    value = "怎么用、权限干嘛的",
+                    valueColor = palette.textDim,
+                    onClick = { showUsage = true }
+                )
+                ThinDivider()
+                JumpRow(
+                    title = "使用声明",
+                    value = "再读一遍",
+                    valueColor = palette.textDim,
+                    onClick = { showStatement = true }
+                )
+                ThinDivider()
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -376,7 +394,14 @@ fun SettingsScreen() {
                     Text("版本", color = palette.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
                     Text(versionName, color = palette.textDim, fontSize = 12.sp)
                 }
-                ThinDivider()
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("𝒟𝒶𝓉𝒶")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                 Row(
                     Modifier.fillMaxWidth().clickable { clearStep = 1 }.padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -388,6 +413,14 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(120.dp))
+    }
+
+    if (showUsage) {
+        UsageDialog(onDismiss = { showUsage = false })
+    }
+
+    if (showStatement) {
+        StatementDialog(onAgree = { showStatement = false }, onDismiss = { showStatement = false })
     }
 
     if (clearStep == 1) {

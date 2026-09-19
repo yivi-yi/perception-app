@@ -13,20 +13,25 @@ class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getLongExtra(AlarmScheduler.EXTRA_ID, -1L)
-        val title = intent.getStringExtra(AlarmScheduler.EXTRA_TITLE) ?: "闹钟"
-        AlarmRingService.start(context, id, title)
-
         val app = context.applicationContext as? PerceptionApp ?: return
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val alarm = app.repository.all().firstOrNull { it.id == id } ?: return@launch
-                if (!alarm.remind) return@launch
-                if (alarm.repeatDays.isBlank()) {
-                    // 一次性的响过就自己关掉，列表里不会留一条"还开着"的假象
-                    app.repository.update(alarm.copy(remind = false))
+                val item = app.repository.all().firstOrNull { it.id == id } ?: return@launch
+                if (!item.remind) return@launch
+
+                if (item.category == "闹钟") {
+                    AlarmRingService.start(context, id, item.title.ifBlank { "闹钟" })
+                    if (item.repeatDays.isBlank()) {
+                        // 一次性的响过就自己关掉，列表里不会留一条"还开着"的假象
+                        app.repository.update(item.copy(remind = false))
+                    } else {
+                        AlarmScheduler.schedule(context, item)
+                    }
                 } else {
-                    AlarmScheduler.schedule(context, alarm)
+                    // 日程：提醒过一次就完事
+                    ReminderNotifier.show(context, item)
+                    app.repository.update(item.copy(remind = false))
                 }
             } finally {
                 pending.finish()

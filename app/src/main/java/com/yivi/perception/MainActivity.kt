@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,6 +32,7 @@ import com.yivi.perception.ui.AppBackground
 import com.yivi.perception.ui.alarm.AlarmScreen
 import com.yivi.perception.ui.calendar.CalendarScreen
 import com.yivi.perception.ui.common.GlassCard
+import com.yivi.perception.ui.common.StatementDialog
 import com.yivi.perception.ui.settings.SettingsScreen
 import com.yivi.perception.ui.theme.LocalPalette
 import com.yivi.perception.ui.theme.PerceptionTheme
@@ -56,6 +58,8 @@ private enum class Tab(val label: String) {
 @Composable
 private fun MainScreen() {
     var selected by rememberSaveable { mutableIntStateOf(0) }
+    val settings = PerceptionApp.instance.settings
+    val agreed by settings.noticeAgreed.collectAsState()
 
     Box(Modifier.fillMaxSize().systemBarsPadding()) {
         when (Tab.entries[selected]) {
@@ -68,6 +72,11 @@ private fun MainScreen() {
             onSelect = { selected = it },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp)
         )
+    }
+
+    // 装完第一次打开必须先看声明，点过"我同意"就不再弹
+    if (!agreed) {
+        StatementDialog(onAgree = { settings.setNoticeAgreed(true) })
     }
 }
 

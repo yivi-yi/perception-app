@@ -106,6 +106,222 @@ class NativeToolkit(
         mapOf("ok" to true).plus(out)
     }
 
+    suspend fun location(): Map<String, Any> = withContext(Dispatchers.IO) {
+        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
+            !hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+        ) {
+            return@withContext mapOf("ok" to false, "error" to "没给定位权限，去应用设置里开一下")
+        }
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            ?: return@withContext mapOf("ok" to false, "error" to "这台设备没有定位服务")
+
+        var loc: Location? = null
+        var realtime = false
+        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
+            val got = currentLocation(lm, provider)
+            if (got != null) {
+                loc = got
+                realtime = true
+                break
+            }
+        }
+        if (loc == null) {
+            for (provider in listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER
+            )) {
+                loc = runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
+                if (loc != null) break
+            }
+        }
+
+        val fix = loc ?: return@withContext mapOf("ok" to false, "error" to "没拿到定位（可能从来没定过位）")
+        val ageMinutes = ((System.currentTimeMillis() - fix.time) / 60000L).toInt()
+        mapOf(
+            "ok" to true,
+            "realtime" to realtime,
+            "lat" to fix.latitude,
+            "lng" to fix.longitude,
+            "provider" to (fix.provider ?: ""),
+            "age_minutes" to ageMinutes,
+            "address" to reverseGeocode(fix.latitude, fix.longitude),
+            "note" to if (realtime) "本次是实时定位" else "不是实时，是最近一次定位，约 $ageMinutes 分钟前"
+        )
+    }
+
+    private fun currentLocation(lm: LocationManager, provider: String): Location? = try {
+        if (lm.getProvider(provider) == null) {
+            null
+        } else {
+            val latch = CountDownLatch(1)
+            var result: Location? = null
+            lm.getCurrentLocation(provider, null, context.mainExecutor) { l ->
+                result = l
+                latch.countDown()
+            }
+            latch.await(6, TimeUnit.SECONDS)
+            result
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    @Suppress("DEPRECATION")
+    private fun reverseGeocode(lat: Double, lng: Double): String {
+        try {
+            val geocoder = Geocoder(context, Locale.getDefault())
+            val list = geocoder.getFromLocation(lat, lng, 1)
+            val addr = list?.firstOrNull()?.let { a ->
+                listOfNotNull(a.adminArea, a.locality, a.subLocality, a.thoroughfare, a.subThoroughfare)
+                    .joinToString("")
+            }
+            if (!addr.isNullOrBlank()) return addr
+        } catch (e: Exception) {
+        }
+        val text = httpGet(
+            "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=$lat&longitude=$lng&localityLanguage=zh",
+            8000
+        )
+        val j = jsonObj(text) ?: return ""
+        return listOfNotNull(
+            j["countryName"].strOrNull(),
+            j["principalSubdivision"].strOrNull(),
+            j["city"].strOrNull(),
+            j["locality"].strOrNull()
+        ).distinct().joinToString(" ")
+    }
+
+    /** 天气：不给城市就用最近定位，数据来自 open-meteo（不用 key） */
+    suspend fun weather(city: String?, source: String?): Map<String, Any> = withContext(Dispatchers.IO) {
+        var lat: Double
+        var lng: Double
+        var place = ""
+
+        // 默认只给当前天气；传 forecast 才带上未来三天
+        val wantForecast = (source ?: "").equals("forecast", ignoreCase = true)
+
+        // 没指定城市就用设置里的默认城市；连默认城市都没有才用定位
+        val wanted = city?.takeIf { it.isNotBlank() } ?: settings.weatherCity.value.takeIf { it.isNotBlank() }
+
+        if (wanted != null) {
+            val geo = jsonObj(
+                httpGet(
+                    "https://geocoding-api.open-meteo.com/v1/search?name=${encode(wanted)}&count=1&language=zh&format=json",
+                    10000
+                )
+            )
+            val first = geo?.get("results")?.asArray()?.firstOrNull()?.jsonObject
+                ?: return@withContext mapOf("ok" to false, "error" to "找不到城市「$wanted」")
+            lat = first["latitude"].numOrNull() ?: return@withContext mapOf("ok" to false, "error" to "城市坐标没拿到")
+            lng = first["longitude"].numOrNull() ?: 0.0
+            place = listOfNotNull(first["name"].strOrNull(), first["admin1"].strOrNull()).distinct().joinToString(" ")
+        } else {
+            val fix = lastFix() ?: return@withContext mapOf(
+                "ok" to false,
+                "error" to "没传城市、设置里也没有默认城市、又定位不到：三个里给一个就行"
+            )
+            lat = fix.first
+            lng = fix.second
+            place = "当前位置"
+        }
+
+        val text = httpGet(
+            "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lng" +
+                "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m" +
+                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+                "&timezone=auto&forecast_days=3",
+            12000
+        )
+        val root = jsonObj(text)
+            ?: return@withContext weatherFallback(lat, lng, place, wantForecast)
+                ?: mapOf("ok" to false, "error" to "天气接口都没通，检查一下手机能不能上网")
+        val cur = root["current"]?.jsonObject
+        val daily = root["daily"]?.jsonObject
+
+        val days = mutableListOf<Map<String, Any>>()
+        val dates = daily?.get("time")?.asArray()
+        if (dates != null && wantForecast) {
+            dates.forEachIndexed { i, d ->
+                days.add(
+                    mapOf(
+                        "date" to (d.strOrNull() ?: ""),
+                        "weather" to weatherText(daily["weather_code"].asArray()?.getOrNull(i)?.numOrNull()?.toInt()),
+                        "min" to (daily["temperature_2m_min"].asArray()?.getOrNull(i)?.numOrNull() ?: 0.0),
+                        "max" to (daily["temperature_2m_max"].asArray()?.getOrNull(i)?.numOrNull() ?: 0.0),
+                        "rain_prob" to (daily["precipitation_probability_max"].asArray()?.getOrNull(i)?.numOrNull() ?: 0.0)
+                    )
+                )
+            }
+        }
+
+        mapOf(
+            "ok" to true,
+            "place" to place,
+            "now" to mapOf(
+                "temp" to (cur?.get("temperature_2m")?.numOrNull() ?: 0.0),
+                "feels_like" to (cur?.get("apparent_temperature")?.numOrNull() ?: 0.0),
+                "humidity" to (cur?.get("relative_humidity_2m")?.numOrNull() ?: 0.0),
+                "wind" to (cur?.get("wind_speed_10m")?.numOrNull() ?: 0.0),
+                "weather" to weatherText(cur?.get("weather_code")?.numOrNull()?.toInt())
+            ),
+            "days" to days
+        )
+    }
+
+    /** 备用天气源：wttr.in，也不用 key */
+    private fun weatherFallback(lat: Double, lng: Double, place: String, wantForecast: Boolean): Map<String, Any>? {
+        val root = jsonObj(httpGet("https://wttr.in/$lat,$lng?format=j1", 12000)) ?: return null
+        val cur = root["current_condition"]?.asArray()?.firstOrNull()?.jsonObject ?: return null
+        val days = if (!wantForecast) emptyList() else root["weather"]?.asArray()?.take(3)?.map { d ->
+            val o = d.jsonObject
+            val noon = o["hourly"].asArray()?.getOrNull(4)?.jsonObject
+            mapOf(
+                "date" to (o["date"].strOrNull() ?: ""),
+                "weather" to (noon?.get("weatherDesc").asArray()?.firstOrNull()?.jsonObject?.get("value").strOrNull() ?: ""),
+                "min" to ((o["mintempC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "max" to ((o["maxtempC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "rain_prob" to ((noon?.get("chanceofrain").strOrNull() ?: "0").toDoubleOrNull() ?: 0.0)
+            )
+        } ?: emptyList()
+
+        return mapOf(
+            "ok" to true,
+            "place" to place,
+            "source" to "wttr.in（备用源）",
+            "now" to mapOf(
+                "temp" to ((cur["temp_C"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "feels_like" to ((cur["FeelsLikeC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "humidity" to ((cur["humidity"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "wind" to ((cur["windspeedKmph"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
+                "weather" to (cur["weatherDesc"].asArray()?.firstOrNull()?.jsonObject?.get("value").strOrNull() ?: "")
+            ),
+            "days" to days
+        )
+    }
+
+    private suspend fun lastFix(): Pair<Double, Double>? = withContext(Dispatchers.IO) {
+        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
+            !hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+        ) return@withContext null
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return@withContext null
+        var loc: Location? = null
+        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
+            val got = currentLocation(lm, provider)
+            if (got != null) {
+                loc = got
+                break
+            }
+        }
+        if (loc == null) {
+            for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+                loc = runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
+                if (loc != null) break
+            }
+        }
+        loc?.let { it.latitude to it.longitude }
+    }
+
     // ── 传感器 ──────────────────────────────────────
 
     /** 常见传感器在这台机器上有没有（只列这几个常用的，不再倒一长串杂项） */
@@ -296,7 +512,7 @@ class NativeToolkit(
     }
 
     fun currentApp(): Map<String, Any> {
-        val svc = PermissionService.service
+        val svc = PermissionService.current
         // 优先问无障碍服务"当前活动的那个窗口"，这才是实时的；lastPackage 只是最后一次窗口变化事件，会慢一拍
         val live = runCatching {
             svc?.windows?.firstOrNull { it.isActive && it.isFocused }

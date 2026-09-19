@@ -11,6 +11,9 @@ class PermissionService : AccessibilityService() {
         @Volatile
         private var service: PermissionService? = null
 
+        /** 外面拿当前连上的这个无障碍服务（没连上就是 null） */
+        val current: PermissionService? get() = service
+
     }
 
     override fun onServiceConnected() {

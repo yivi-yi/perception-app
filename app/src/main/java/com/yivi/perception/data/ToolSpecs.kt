@@ -142,7 +142,7 @@ object Tools {
         // ── 点歌 ──
         ToolSpec(
             "search_song",
-            "搜歌，返回歌名、歌手、专辑和歌曲 id（id 交给 play_song）。这是公开接口，不用配任何东西。",
+            "搜歌，返回歌名、歌手、专辑和歌曲 id（id 交给 play_song）。走的是网易云公开搜索接口，不用配 key；只会搜到网易云的歌。",
             listOf(
                 ToolParam("keyword", "string", "歌名，或者「歌名 歌手」", true),
                 ToolParam("limit", "integer", "返回几条，默认 5，最多 10")
@@ -150,9 +150,9 @@ object Tools {
         ),
         ToolSpec(
             "play_song",
-            "按歌曲 id 在这台手机上打开网易云的那首歌。id 要用 search_song 先搜出来。",
+            "用歌曲 id 在这台手机上唤起网易云播那首歌。注意：只对「网易云音乐」的歌曲 id 有效（别的平台不行），手机没装网易云会退回网页版；id 要先用 search_song 搜出来。",
             listOf(
-                ToolParam("id", "integer", "歌曲 id，来自 search_song", true),
+                ToolParam("id", "integer", "网易云的歌曲 id，来自 search_song", true),
                 ToolParam("name", "string", "歌名，可空，只用来回话时念一下")
             )
         )

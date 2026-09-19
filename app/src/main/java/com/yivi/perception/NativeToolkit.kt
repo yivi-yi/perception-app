@@ -438,16 +438,13 @@ class NativeToolkit(
             "volume" to mapOf(
                 "music" to level(android.media.AudioManager.STREAM_MUSIC),
                 "ring" to level(android.media.AudioManager.STREAM_RING),
-                "notification" to run {
-                    val n = level(android.media.AudioManager.STREAM_NOTIFICATION)
-                    // 有些机型（一加/OPPO 这类）通知音跟铃声共用一路，单读通知会是 0
-                    if (n == 0 && level(android.media.AudioManager.STREAM_RING) > 0) {
-                        level(android.media.AudioManager.STREAM_RING)
-                    } else n
-                },
+                "notification" to level(android.media.AudioManager.STREAM_NOTIFICATION),
                 "alarm" to level(android.media.AudioManager.STREAM_ALARM)
             ),
-            "note" to "音量是百分比（0-100）。通知跟铃声共用一个音量时，这里通知显示的就是铃声那路"
+            "note" to run {
+                val notif = level(android.media.AudioManager.STREAM_NOTIFICATION)
+                if (notif == 0) "音量是百分比（0-100）。注意：通知音量现在是 0，来消息不会响" else "音量是百分比（0-100）"
+            }
         )
     }
 
@@ -536,11 +533,11 @@ class NativeToolkit(
                     val v = (level.coerceIn(0, 100) * max + 50) / 100
                     am.setStreamVolume(target, v, 0)
                 }
-                // 通知跟铃声共用的机型：单设通知那路没声音，把铃声那路一起设上
-                if (target == android.media.AudioManager.STREAM_NOTIFICATION) {
-                    val ringMax = am.getStreamMaxVolume(android.media.AudioManager.STREAM_RING).coerceAtLeast(1)
-                    val ringV = (level.coerceIn(0, 100) * ringMax + 50) / 100
-                    am.setStreamVolume(android.media.AudioManager.STREAM_RING, ringV, 0)
+                // 通知那路如果能单独调就单独调（termux 那种四路都能调的机器都是独立的）
+                if (am.getStreamMaxVolume(android.media.AudioManager.STREAM_NOTIFICATION) <= 0 &&
+                    target == android.media.AudioManager.STREAM_NOTIFICATION
+                ) {
+                    done.add("这台机器没有独立的通知音量，跟着铃声走")
                 }
                 done.add("音量=${level.coerceIn(0, 100)}%")
             } catch (e: Exception) {
@@ -592,29 +589,42 @@ class NativeToolkit(
         if (id <= 0L) {
             return@withContext mapOf("ok" to false, "error" to "要传歌曲 id：先用 search_song 搜出 id")
         }
-        val opened = openNetEase(id)
+        val how = openNetEase(id)
         mapOf(
-            "ok" to opened,
+            "ok" to (how != null),
             "id" to id,
             "name" to name,
-            "note" to if (opened) "已经跳本机网易云了" else "没打开：本机可能没装网易云，网页也没能打开"
+            "route" to (how ?: "没跳成"),
+            "note" to if (how != null) {
+                "已经用「$how」打开这首歌了"
+            } else {
+                "没打开：这台手机没装网易云音乐，网页版也没调起来"
+            }
         )
     }
 
-    private fun openNetEase(id: Long): Boolean {
+    /**
+     * 唤起网易云播这首歌，返回走的是哪条路。
+     * 网易云的 deep link：orpheus://song/<id>/?autoplay=1（带上 autoplay 才会直接播）
+     */
+    private fun openNetEase(id: Long): String? {
         val tries = listOf(
-            "orpheus://song/$id",
-            "https://music.163.com/song?id=$id"
+            "orpheus://song/$id/?autoplay=1" to "网易云客户端（直接播放）",
+            "orpheus://song/$id" to "网易云客户端（歌曲页）",
+            "https://music.163.com/song?id=$id" to "网页版（没装客户端）"
         )
-        for (uri in tries) {
+        for ((uri, how) in tries) {
             try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (uri.startsWith("orpheus://")) setPackage("com.netease.cloudmusic")
+                }
                 context.startActivity(intent)
-                return true
+                return how
             } catch (e: Exception) {
             }
         }
-        return false
+        return null
     }
 
     // ── 日程 / 闹钟 ─────────────────────────────────

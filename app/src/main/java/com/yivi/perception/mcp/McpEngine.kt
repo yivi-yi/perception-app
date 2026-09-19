@@ -170,13 +170,15 @@ class McpEngine(
 
     private fun result(id: JsonElement?, r: JsonObject): JsonObject = buildJsonObject {
         put("jsonrpc", JsonPrimitive("2.0"))
-        id?.let { put("id", it) } ?: put("id", JsonNull)
+        // 注意：put 会返回"这个键原来的值"，所以不能写成 id?.let{ put("id", it) } ?: put("id", JsonNull)
+        // —— 那样 elvis 每次都会再写一次 null，把 id 覆盖掉
+        put("id", id ?: JsonNull)
         put("result", r)
     }
 
     private fun error(id: JsonElement?, message: String, code: Int): JsonObject = buildJsonObject {
         put("jsonrpc", JsonPrimitive("2.0"))
-        id?.let { put("id", it) } ?: put("id", JsonNull)
+        put("id", id ?: JsonNull)
         put("error", buildJsonObject {
             put("code", JsonPrimitive(code))
             put("message", JsonPrimitive(message))

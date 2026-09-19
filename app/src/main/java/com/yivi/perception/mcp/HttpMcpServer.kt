@@ -146,7 +146,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                                         Response.Status.BAD_REQUEST, "application/json",
                                         json.encodeToString(JsonElement.serializer(), buildJsonObject {
                                             put("jsonrpc", JsonPrimitive("2.0"))
-                                            put("id", JsonPrimitive(""))
+                                            put("id", kotlinx.serialization.json.JsonNull)
                                             put("error", buildJsonObject {
                                                 put("code", JsonPrimitive(-32700))
                                                 put("message", JsonPrimitive("parse error"))

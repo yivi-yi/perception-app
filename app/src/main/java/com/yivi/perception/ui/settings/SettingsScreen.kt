@@ -675,11 +675,15 @@ private fun selfTest(port: Int): String = try {
     if (init.first !in 200..299) {
         "没通：initialize 返回 HTTP ${init.first} · ${init.second.take(80)}"
     } else {
+        // id 必须原样回，客户端靠它对号
+        val idEchoed = Regex("\"id\":\\s*1\\b").containsMatchIn(init.second)
         val listed = call("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}")
         val text = listed.second
-        val count = Regex("\"name\":").findAll(text).count()
-        if (listed.first in 200..299 && text.contains("\"tools\"")) {
-            "通了：initialize 200，tools/list 拿到 $count 个工具"
+        val count = Regex("\"inputSchema\":").findAll(text).count()
+        if (!idEchoed) {
+            "initialize 通了，但响应里的 id 不对（我没把 id 原样回）· ${init.second.take(80)}"
+        } else if (listed.first in 200..299 && text.contains("\"tools\"")) {
+            "通了：initialize 200（id 对得上），tools/list 拿到 $count 个工具"
         } else {
             "initialize 通了，但 tools/list 不对劲：HTTP ${listed.first} · ${text.take(80)}"
         }

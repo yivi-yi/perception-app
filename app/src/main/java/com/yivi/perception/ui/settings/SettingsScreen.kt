@@ -109,6 +109,8 @@ fun SettingsScreen() {
     var editName by remember { mutableStateOf(false) }
     var pickAnnivDate by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
+    var editNcm by remember { mutableStateOf(false) }
+    val ncmBase by settings.ncmBase.collectAsState()
     var showUsage by remember { mutableStateOf(false) }
     var showStatement by remember { mutableStateOf(false) }
     val bootStart by settings.bootStart.collectAsState()
@@ -132,6 +134,7 @@ fun SettingsScreen() {
             add(Manifest.permission.ACCESS_FINE_LOCATION)
             add(Manifest.permission.ACCESS_COARSE_LOCATION)
             if (Build.VERSION.SDK_INT >= 29) add(Manifest.permission.ACTIVITY_RECOGNITION)
+            add(Manifest.permission.RECORD_AUDIO)
         }.filter {
             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
@@ -286,12 +289,34 @@ fun SettingsScreen() {
             shape = RoundedCornerShape(24.dp),
             showHighlight = false
         ) {
-            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("工具盒", color = palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Text("给别的 AI 调的本机工具", color = palette.textDim, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { showTools = true }.padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("工具盒", color = palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text("给别的 AI 调的本机工具", color = palette.textDim, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+                    }
+                    Text("${ToolCatalog.tools.size} 个", color = palette.accent, fontSize = 12.sp)
                 }
-                Text("${ToolCatalog.tools.size} 个", color = palette.accent, fontSize = 12.sp)
+                ThinDivider()
+                Row(
+                    Modifier.fillMaxWidth().clickable { editNcm = true }.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("网易云 API", color = palette.text, fontSize = 14.sp)
+                        Text(
+                            if (ncmBase.isBlank()) "不填就只有「跳网易云点歌」这个工具用不了"
+                            else ncmBase,
+                            color = palette.textDim,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 3.dp)
+                        )
+                    }
+                    Text(if (ncmBase.isBlank()) "去填" else "改", color = palette.accent, fontSize = 12.sp)
+                }
             }
         }
 
@@ -430,6 +455,16 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(120.dp))
+    }
+
+    if (editNcm) {
+        TextInputDialog(
+            title = "网易云 API 地址",
+            initial = ncmBase,
+            placeholder = "http://192.168.1.251:3000",
+            onDismiss = { editNcm = false },
+            onSave = { settings.setNcmBase(it.trim()); editNcm = false }
+        )
     }
 
     if (showUsage) {

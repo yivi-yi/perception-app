@@ -7,9 +7,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -21,62 +21,83 @@ class McpEngine(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** 工具参数：名字、类型、说明 */
-    private data class P(val name: String, val type: String, val desc: String)
+    /** 工具参数：名字、类型、说明、是否必填 */
+    private data class P(val name: String, val type: String, val desc: String, val required: Boolean = false)
 
     private fun str(name: String, desc: String) = P(name, "string", desc)
     private fun num(name: String, desc: String) = P(name, "integer", desc)
     private fun bool(name: String, desc: String) = P(name, "boolean", desc)
+    private fun reqStr(name: String, desc: String) = P(name, "string", desc, true)
+    private fun reqNum(name: String, desc: String) = P(name, "integer", desc, true)
 
-    private val timeHint = "要填毫秒时间戳（13 位），不是 'HH:mm'"
-    private val repeatHint = "重复星期，如 1,3,5（1=周一 7=周日）；留空就是只响一次"
+    private val timeHint = "毫秒时间戳（13 位数字，比如 1789000000000），不是 '07:30' 这种字符串"
+    private val repeatHint = "重复星期，1=周一 … 7=周日，如 \"1,3,5\"；空字符串=只响一次"
+    private val actionHint = "update=改这一条；delete=删这一条"
 
     private fun toolList(): List<JsonObject> = listOf(
-        tool("list_schedules", "查询所有日程（带 id / 标题 / 备注 / 时间 / 是否提醒）"),
+        // 日程
+        tool("list_schedules", "查这台手机上所有日程，返回 id、标题、备注、时间（毫秒时间戳）、是否提醒。改或删之前先用它拿 id。"),
         tool(
-            "add_schedule", "添加一条日程",
-            str("title", "标题，必填"),
+            "add_schedule", "加一条日程。开了提醒的话，到点会在这台手机上弹通知。",
+            reqStr("title", "日程标题"),
             str("note", "备注，可空"),
             num("time", timeHint),
-            bool("remind", "true 到点弹通知提醒")
+            bool("remind", "true=到点弹通知提醒，不传按 false")
         ),
         tool(
-            "update_schedule", "修改一条日程，只传要改的字段，id 必传",
-            num("id", "日程 id"),
+            "change_schedule", "改或删一条日程。只传要改的字段，没传的保持原样。",
+            reqStr("action", actionHint),
+            reqNum("id", "日程 id，来自 list_schedules"),
             str("title", "新标题"),
             str("note", "新备注"),
             num("time", timeHint),
-            bool("remind", "是否提醒")
+            bool("remind", "是否要提醒")
         ),
-        tool("delete_schedule", "删除一条日程", num("id", "日程 id")),
-        tool("list_alarms", "查询所有闹钟（带 id / 标题 / 时间 / 重复星期）"),
+        // 闹钟
+        tool("list_alarms", "查这台手机上所有闹钟，返回 id、标签、备注、时间、重复星期、是否开着。"),
         tool(
-            "add_alarm", "添加一个闹钟，到点会响铃并弹通知",
-            str("title", "标签，可空"),
+            "add_alarm", "加一个闹钟，到点会在这台手机上一直响（系统铃声+震动），响到有人点通知上的「暂停」或「关闭」为止。",
+            str("title", "闹钟标签，可空"),
             str("note", "备注，可空"),
-            num("time", timeHint + "；重复闹钟只取里面的时分"),
+            num("time", "$timeHint；如果是重复闹钟，只取里面的时分"),
             str("repeatDays", repeatHint)
         ),
         tool(
-            "update_alarm", "修改一个闹钟，只传要改的字段，id 必传",
-            num("id", "闹钟 id"),
+            "change_alarm", "改或删一个闹钟。只传要改的字段，没传的保持原样。",
+            reqStr("action", actionHint),
+            reqNum("id", "闹钟 id，来自 list_alarms"),
             str("title", "新标签"),
             str("note", "新备注"),
             num("time", timeHint),
             str("repeatDays", repeatHint)
         ),
-        tool("delete_alarm", "删除一个闹钟", num("id", "闹钟 id")),
-        tool("device_info", "设备品牌 / 型号 / 安卓版本"),
-        tool("battery", "电量百分比 + 是否在充电"),
-        tool("storage", "存储总容量 / 可用 / 已用（字节）"),
-        tool("location", "最近一次定位（经纬度 + 时间），没给定位权限或没定位过会返回 ok=false"),
-        tool("network", "当前 WiFi 名 / 信号强度 / 本机 IP"),
-        tool("sensors", "列出设备上的传感器"),
-        tool("open_app", "按包名打开一个应用", str("packageName", "应用包名，如 com.tencent.mm")),
-        tool("installed_apps", "列出已安装、可启动的应用（名称 + 包名）"),
-        tool("current_app", "当前前台应用包名（要开无障碍）"),
-        tool("screen_text", "屏幕上最近一次的文字，粗略（要开无障碍）"),
-        tool("read_notifications", "最近收到的通知，最多 20 条（要开通知监听）")
+        // 设备
+        tool("device_info", "这台手机的牌子、型号、安卓版本。"),
+        tool("battery", "电量百分比，以及现在是不是在充电。"),
+        tool("location", "这台手机现在在哪，返回经纬度和文字地址。会先试着拿实时定位（最多等 6 秒），拿不到就退回最近一次定位，并用 realtime / age_minutes 告诉你是不是实时的。"),
+        tool(
+            "weather", "查天气，来自 open-meteo（不用自己配 key）。",
+            str("city", "城市名，如「广州」；不传就用手机当前位置（要定位权限）")
+        ),
+        tool("network", "当前连的 WiFi 名字、信号强度、本机 IP。安卓 10 以上读 WiFi 名需要定位权限。"),
+        tool("sensors", "这台手机上有哪些传感器（只是清单）。要读数用 read_sensor。"),
+        tool(
+            "read_sensor", "读一次传感器的当前值：光线强弱、距离、有没有在动、手机朝向、走了多少步。",
+            reqStr("kind", "light=光线 / proximity=距离 / motion=动静 / direction=朝向 / steps=步数 / all=全都要")
+        ),
+        tool("open_app", "在这台手机上打开一个应用。", reqStr("packageName", "应用包名，如 com.tencent.mm；用 installed_apps 拿")),
+        tool("installed_apps", "列出这台手机上已安装、能启动的应用（名字 + 包名）。"),
+        // 手机状态
+        tool("current_app", "这台手机现在前台是哪个应用，返回应用名和包名（要开无障碍权限）。"),
+        tool("read_screen", "读这台手机当前屏幕上的文字，按行返回，可点的会标 [可点]（要开无障碍权限）。"),
+        tool("read_notifications", "读这台手机通知栏里的通知：优先给现在挂着的，没有就给最近收到的（要开通知监听权限）。"),
+        tool("ambient", "录 3 秒环境音，估一个分贝值，判断安静还是吵、像不像有人在说话（要麦克风权限）。"),
+        // 点歌
+        tool(
+            "play_song", "在这台手机上打开网易云的这首歌。会先查歌名拿歌曲 id，再跳本机网易云的歌曲页。",
+            reqStr("song", "歌名"),
+            str("artist", "歌手，可空；带上更准")
+        )
     )
 
     private fun tool(name: String, desc: String, vararg props: P): JsonObject {
@@ -90,9 +111,7 @@ class McpEngine(
                     })
                 }
             })
-            val required = props.filter {
-                it.name == "id" || it.name == "packageName" || (it.name == "title" && name == "add_schedule")
-            }
+            val required = props.filter { it.required }
             if (required.isNotEmpty()) {
                 put("required", JsonArray(required.map { JsonPrimitive(it.name) }))
             }
@@ -105,15 +124,12 @@ class McpEngine(
     }
 
     /** 通知（notifications/xxx 这种没有 id 的请求）不需要回内容 */
-    fun isNotification(request: JsonObject): Boolean =
-        request["id"] == null || request["id"] is JsonNull
+    fun isNotification(request: JsonObject): Boolean = request["id"] == null || request["id"] is JsonNull
 
     suspend fun handle(request: JsonObject): JsonObject {
         val id = request["id"]
-        if (isNotification(request)) {
-            // initialized / cancelled 这些是通知，不用答
-            return JsonObject(emptyMap())
-        }
+        if (isNotification(request)) return JsonObject(emptyMap())
+
         val method = request["method"]?.jsonPrimitive?.contentOrNull ?: return error(id, "no method", -32600)
         val params = request["params"] as? JsonObject ?: JsonObject(emptyMap())
 
@@ -129,10 +145,12 @@ class McpEngine(
                         put("name", JsonPrimitive("Perception"))
                         put("version", JsonPrimitive("1.0"))
                     })
-                    put("instructions", JsonPrimitive("手机上的日历和闹钟。时间参数一律用毫秒时间戳。"))
+                    put("instructions", JsonPrimitive("手机上的日历、闹钟和一堆本机小工具。所有时间参数都是毫秒时间戳。工具出错时会返回 isError=true 和一句原因。"))
                 }
             )
+
             "tools/list" -> result(id, buildJsonObject { put("tools", JsonArray(toolList())) })
+
             "tools/call" -> {
                 val name = params["name"]?.jsonPrimitive?.contentOrNull ?: return error(id, "no tool name", -32602)
                 val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
@@ -148,6 +166,7 @@ class McpEngine(
                     }
                 )
             }
+
             "ping" -> result(id, buildJsonObject { put("ok", JsonPrimitive(true)) })
             else -> error(id, "method not found: $method", -32601)
         }
@@ -165,32 +184,40 @@ class McpEngine(
                 s("title") ?: "无标题", s("note") ?: "",
                 l("time") ?: System.currentTimeMillis(), b("remind") ?: false
             )
-            "update_schedule" -> toolkit.updateEvent(l("id") ?: -1, s("title"), s("note"), l("time"), b("remind"), null)
-            "delete_schedule" -> toolkit.deleteEvent(l("id") ?: -1)
+            "change_schedule" -> {
+                val id = l("id") ?: -1L
+                if ((s("action") ?: "").lowercase().startsWith("del")) toolkit.deleteEvent(id)
+                else toolkit.updateEvent(id, s("title"), s("note"), l("time"), b("remind"), null)
+            }
             "list_alarms" -> toolkit.listAlarms()
             "add_alarm" -> toolkit.addAlarm(
                 s("title") ?: "闹钟", s("note") ?: "",
                 l("time") ?: System.currentTimeMillis(), s("repeatDays") ?: ""
             )
-            "update_alarm" -> toolkit.updateEvent(l("id") ?: -1, s("title"), s("note"), l("time"), null, s("repeatDays"))
-            "delete_alarm" -> toolkit.deleteEvent(l("id") ?: -1)
+            "change_alarm" -> {
+                val id = l("id") ?: -1L
+                if ((s("action") ?: "").lowercase().startsWith("del")) toolkit.deleteEvent(id)
+                else toolkit.updateEvent(id, s("title"), s("note"), l("time"), null, s("repeatDays"))
+            }
             "device_info" -> toolkit.deviceInfo()
             "battery" -> toolkit.battery()
-            "storage" -> toolkit.storage()
-            "location" -> toolkit.lastLocation()
+            "location" -> toolkit.location()
+            "weather" -> toolkit.weather(s("city"))
             "network" -> toolkit.network()
             "sensors" -> toolkit.sensors()
+            "read_sensor" -> toolkit.readSensor(s("kind") ?: "all")
             "open_app" -> toolkit.openApp(s("packageName") ?: "")
             "installed_apps" -> toolkit.installedApps()
             "current_app" -> toolkit.currentApp()
-            "screen_text" -> toolkit.screenText()
+            "read_screen" -> toolkit.readScreen()
             "read_notifications" -> toolkit.notifications()
-            else -> mapOf("error" to "unknown tool: $name")
+            "ambient" -> toolkit.ambient()
+            "play_song" -> toolkit.playSong(s("song") ?: "", s("artist"))
+            else -> mapOf("ok" to false, "error" to "没有这个工具：$name")
         }
 
         val failed = out is Map<*, *> && (out["error"] != null || out["ok"] == false)
-        val text = json.encodeToString(JsonElement.serializer(), toJson(out))
-        return text to failed
+        return json.encodeToString(JsonElement.serializer(), toJson(out)) to failed
     }
 
     private fun toJson(m: Any?): JsonElement = when (m) {

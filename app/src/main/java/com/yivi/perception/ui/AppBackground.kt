@@ -32,7 +32,7 @@ fun AppBackground(content: @Composable () -> Unit) {
     val bgPath by PerceptionApp.instance.settings.bgUri.collectAsState()
 
     val full = remember(bgPath) { decodeWallpaper(bgPath, 1800) }
-    val small = remember(bgPath) { decodeWallpaper(bgPath, 90) }
+    val small = remember(bgPath) { decodeWallpaper(bgPath, 48) }
 
     CompositionLocalProvider(LocalBlurredWallpaper provides small) {
         Box(Modifier.fillMaxSize()) {
@@ -52,8 +52,8 @@ fun AppBackground(content: @Composable () -> Unit) {
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(
                         listOf(
-                            scrim.copy(alpha = if (palette.isDark) 0.20f else 0.26f),
-                            scrim.copy(alpha = if (palette.isDark) 0.46f else 0.46f)
+                            scrim.copy(alpha = if (palette.isDark) 0.16f else 0.22f),
+                            scrim.copy(alpha = if (palette.isDark) 0.38f else 0.40f)
                         )
                     )
                 )

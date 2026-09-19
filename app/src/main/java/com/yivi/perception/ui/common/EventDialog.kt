@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -71,12 +72,12 @@ fun ScheduleDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(26.dp),
-        title = { Text("添加日程", color = palette.text, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
+        containerColor = palette.dialogTint,
+        shape = RoundedCornerShape(22.dp),
+        title = { Text("添加日程", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column(
-                Modifier.verticalScroll(rememberScrollState()),
+                Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 OutlinedTextField(
@@ -140,8 +141,8 @@ fun ScheduleDialog(
         val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = true)
         AlertDialog(
             onDismissRequest = { showTime = false },
-            containerColor = palette.surface,
-            shape = RoundedCornerShape(26.dp),
+            containerColor = palette.dialogTint,
+            shape = RoundedCornerShape(22.dp),
             confirmButton = {
                 TextButton(onClick = {
                     hour = state.hour; minute = state.minute; showTime = false
@@ -167,12 +168,12 @@ fun AlarmDialog(onDismiss: () -> Unit, onSave: (EventEntity) -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(26.dp),
-        title = { Text("添加闹钟", color = palette.text, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
+        containerColor = palette.dialogTint,
+        shape = RoundedCornerShape(22.dp),
+        title = { Text("添加闹钟", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column(
-                Modifier.verticalScroll(rememberScrollState()),
+                Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -245,8 +246,8 @@ fun AlarmDialog(onDismiss: () -> Unit, onSave: (EventEntity) -> Unit) {
         val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = true)
         AlertDialog(
             onDismissRequest = { showTime = false },
-            containerColor = palette.surface,
-            shape = RoundedCornerShape(26.dp),
+            containerColor = palette.dialogTint,
+            shape = RoundedCornerShape(22.dp),
             confirmButton = {
                 TextButton(onClick = {
                     hour = state.hour; minute = state.minute; showTime = false

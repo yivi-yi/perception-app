@@ -150,9 +150,9 @@ fun ConfirmDialog(
     val palette = LocalPalette.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(24.dp),
-        title = { Text(title, color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
+        containerColor = palette.dialogTint,
+        shape = RoundedCornerShape(20.dp),
+        title = { Text(title, color = palette.text, fontSize = 15.5.sp, fontWeight = FontWeight.Medium) },
         text = { Text(text, color = palette.textLight, fontSize = 13.sp) },
         confirmButton = {
             TextButton(onClick = onConfirm) { Text(confirmText, color = MaterialTheme.colorScheme.primary) }
@@ -176,9 +176,9 @@ fun TextInputDialog(
     var text by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(24.dp),
-        title = { Text(title, color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
+        containerColor = palette.dialogTint,
+        shape = RoundedCornerShape(20.dp),
+        title = { Text(title, color = palette.text, fontSize = 15.5.sp, fontWeight = FontWeight.Medium) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(

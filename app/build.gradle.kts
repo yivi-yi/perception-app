@@ -21,9 +21,24 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        // 仓库里带的固定签名（不是私密 key，只为让它每次装的都是同一个包）
+        create("repo") {
+            storeFile = file("../keystore/perception.p12")
+            storePassword = "perception2026"
+            keyAlias = "perception"
+            keyPassword = "perception2026"
+            storeType = "PKCS12"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("repo")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("repo")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

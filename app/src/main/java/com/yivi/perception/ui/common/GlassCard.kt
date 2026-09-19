@@ -46,6 +46,7 @@ fun GlassCard(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(22.dp),
     tint: Color? = null,
+    borderColor: Color? = null,
     showBorder: Boolean = true,
     showHighlight: Boolean = true,
     grain: Boolean = true,
@@ -78,12 +79,25 @@ fun GlassCard(
                         val dh = img.height * scale
                         val offX = (w - dw) / 2f
                         val offY = (h - dh) / 2f
-                        drawImage(
-                            image = img,
-                            dstOffset = IntOffset((offX - pos.x).roundToInt(), (offY - pos.y).roundToInt()),
-                            dstSize = IntSize(dw.roundToInt(), dh.roundToInt()),
-                            filterQuality = FilterQuality.Low
+                        val baseX = offX - pos.x
+                        val baseY = offY - pos.y
+                        val size = IntSize(dw.roundToInt(), dh.roundToInt())
+                        // 小图放大一次不够细，错位叠几层把像素感抹平（就是便宜的模糊）
+                        val taps = listOf(
+                            0f to 0f, 2.5f to 0f, -2.5f to 0f, 0f to 2.5f, 0f to -2.5f
                         )
+                        taps.forEach { (dx, dy) ->
+                            drawImage(
+                                image = img,
+                                dstOffset = IntOffset(
+                                    (baseX + dx * density).roundToInt(),
+                                    (baseY + dy * density).roundToInt()
+                                ),
+                                dstSize = size,
+                                alpha = 1f,
+                                filterQuality = FilterQuality.Low
+                            )
+                        }
                     }
             )
         }
@@ -110,7 +124,7 @@ fun GlassCard(
         }
 
         if (showBorder) {
-            Box(Modifier.matchParentSize().border(1.dp, palette.chipBorder, shape))
+            Box(Modifier.matchParentSize().border(1.dp, borderColor ?: palette.chipBorder, shape))
         }
 
         // 顶部内高光：有模糊底就不加了，不然糊成一片

@@ -3,10 +3,11 @@ package com.yivi.perception.ui.theme
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 
 /**
- * 全局配色。分暗/亮两套，主色可选粉或灰。
- * 后面的短别名（text / textDim / surface…）是给界面代码用的，跟小家那边一致的叫法。
+ * 全局配色。底色走中性灰，不偏紫。
+ * 三套主题色：pink 粉 / blue 灰蓝 / gray 灰（跟小家灰渡界一个调）。
  */
 data class Palette(
     val accent: Color,
@@ -25,45 +26,49 @@ data class Palette(
     val textLight: Color get() = textSecondary
     val textDim: Color get() = textSecondary.copy(alpha = 0.72f)
     val background: Color get() = bgBottom
-    val surface: Color get() = if (isDark) Color(0xFF1D1626) else Color(0xFFFFFFFF)
+    val surface: Color get() = if (isDark) Color(0xFF1C1C20) else Color(0xFFFFFFFF)
     val chipBg: Color get() = cardViolet
-    val chipBorder: Color get() = if (isDark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.85f)
+    val chipBorder: Color get() = if (isDark) Color.White.copy(alpha = 0.07f) else Color.White.copy(alpha = 0.85f)
 
     val bgGradient: List<Color> get() = listOf(bgTop, bgBottom)
     val cardGradient: List<Color> get() = listOf(cardTop, cardBottom)
 
-    /** 毛玻璃卡片里的那层半透明底 */
+    /** 毛玻璃卡片里的半透明底：alpha 压低，雾化才透得出来 */
     val glassTint: Color
-        get() = if (isDark) Color(0xFF1B1425).copy(alpha = 0.46f) else Color.White.copy(alpha = 0.52f)
+        get() = if (isDark) Color(0xFF17171B).copy(alpha = 0.34f) else Color.White.copy(alpha = 0.44f)
 
-    /** 玻璃上的一点点提亮，亮色主题更明显 */
-    val glassSheen: Color
-        get() = if (isDark) Color.White.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.30f)
+    /** 弹窗底色：跟主题色，稍微沾一点主色 */
+    val dialogTint: Color
+        get() = lerp(surface, accent, if (isDark) 0.10f else 0.05f)
 
-    /** 花体标题用的渐变刷 */
     val titleBrush: Brush get() = Brush.linearGradient(listOf(textPrimary, accent, textPrimary))
 
     companion object {
         fun of(accentKind: String, dark: Boolean): Palette {
-            val accentP = if (dark) Color(0xFFFF9FB0) else Color(0xFFE0708A)
-            val accentG = if (dark) Color(0xFFBFC7D4) else Color(0xFF8E96A6)
-            val accent = if (accentKind == "gray") accentG else accentP
+            val pink = if (dark) Color(0xFFFF9FB0) else Color(0xFFD96E86)
+            val blue = if (dark) Color(0xFFAFC2D8) else Color(0xFF7C8FA6)
+            val gray = if (dark) Color(0xFFB9B9B9) else Color(0xFF828282)
+            val accent = when (accentKind) {
+                "blue" -> blue
+                "gray" -> gray
+                else -> pink
+            }
             val accentSoft = accent.copy(alpha = 0.25f)
 
             return if (dark) Palette(
                 accent = accent, accentSoft = accentSoft,
-                bgTop = Color(0xFF0E0A12), bgBottom = Color(0xFF191122),
-                cardTop = Color(0xFF241C30), cardBottom = Color(0xFF180D24),
-                cardViolet = Color(0xFF3A2A4A),
-                textPrimary = Color(0xFFF6EAF0), textSecondary = Color(0xFFB8A7B5),
-                lineViolet = Color(0xFF4A3A5E), isDark = true
+                bgTop = Color(0xFF121216), bgBottom = Color(0xFF17171C),
+                cardTop = Color(0xFF232329), cardBottom = Color(0xFF17171B),
+                cardViolet = Color(0xFF2B2B31),
+                textPrimary = Color(0xFFF2F2F4), textSecondary = Color(0xFFB4B4BC),
+                lineViolet = Color(0xFF3B3B42), isDark = true
             ) else Palette(
                 accent = accent, accentSoft = accentSoft,
-                bgTop = Color(0xFFF7F1F6), bgBottom = Color(0xFFEDE4F0),
-                cardTop = Color(0xFFFFFFFF), cardBottom = Color(0xFFF3EBF5),
-                cardViolet = Color(0xFFE4D8EA),
-                textPrimary = Color(0xFF2A2133), textSecondary = Color(0xFF6B5F75),
-                lineViolet = Color(0xFFD0C0D8), isDark = false
+                bgTop = Color(0xFFF7F7F8), bgBottom = Color(0xFFEFEFF1),
+                cardTop = Color(0xFFFFFFFF), cardBottom = Color(0xFFF2F2F4),
+                cardViolet = Color(0xFFE6E6E9),
+                textPrimary = Color(0xFF26262A), textSecondary = Color(0xFF6C6C74),
+                lineViolet = Color(0xFFD3D3D8), isDark = false
             )
         }
     }

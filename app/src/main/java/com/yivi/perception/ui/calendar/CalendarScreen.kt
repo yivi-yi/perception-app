@@ -392,13 +392,13 @@ private fun AnnivEditDialog(
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(26.dp),
-        title = { Text("纪念日", color = palette.text, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
+        containerColor = palette.dialogTint,
+        shape = RoundedCornerShape(22.dp),
+        title = { Text("纪念日", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(name.ifBlank { "纪念日" }, color = palette.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text(name.ifBlank { "纪念日" }, color = palette.text, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
                     PillButton("改名字", false, onClick = onEditName)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

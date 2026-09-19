@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -83,11 +84,6 @@ import com.yivi.perception.ui.common.UsageDialog
 import com.yivi.perception.ui.common.ThinDivider
 import com.yivi.perception.ui.theme.LocalPalette
 import java.io.File
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-
-private val dateFmt = DateTimeFormatter.ofPattern("yyyy年M月d日")
 
 @Composable
 fun SettingsScreen() {
@@ -99,15 +95,10 @@ fun SettingsScreen() {
     val dark by settings.dark.collectAsState()
     val bgPath by settings.bgUri.collectAsState()
     val logs by settings.logs.collectAsState()
-    val annivText by settings.annivText.collectAsState()
-    val annivType by settings.annivType.collectAsState()
-    val annivDate by settings.annivDate.collectAsState()
 
     var running by remember { mutableStateOf(PerceptionApp.instance.mcpServer.isRunning) }
     var showTools by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
-    var editName by remember { mutableStateOf(false) }
-    var pickAnnivDate by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
     var editCity by remember { mutableStateOf(false) }
     val weatherCity by settings.weatherCity.collectAsState()
@@ -184,14 +175,48 @@ fun SettingsScreen() {
             style = MaterialTheme.typography.titleMedium.copy(brush = palette.titleBrush)
         )
 
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("ℳ𝒞𝒫 𝒮ℯ𝓇𝓋ℯ𝓇", "服务")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    if (running) "服务运行中 · 局域网的设备都能连" else "服务没开，工具盒现在连不上",
+                    color = if (running) palette.accent else palette.textDim,
+                    fontSize = 11.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                ActionPill(
+                    text = if (running) "停止服务" else "启动服务",
+                    onClick = { if (running) stopServer() else startServer() },
+                    modifier = Modifier.fillMaxWidth(),
+                    danger = running
+                )
+                Spacer(Modifier.height(14.dp))
+                AddressRow("本机", "http://127.0.0.1:$port/mcp")
+                Spacer(Modifier.height(6.dp))
+                AddressRow("局域网", "http://$lanIp:$port/mcp")
+                Spacer(Modifier.height(12.dp))
+                ThinDivider()
+                Row(
+                    Modifier.fillMaxWidth().clickable { showLogs = true }.padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("运行日志", color = palette.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text("${logs.size} 条", color = palette.textDim, fontSize = 12.sp)
+                }
+            }
+        }
+
         Spacer(Modifier.height(16.dp))
         SectionLabel("𝒯𝒽ℯ𝓂ℯ", "主题")
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(16.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ThemeSwatch("粉色", accent != "gray", listOf(Color(0xFFFF9FB0), Color(0xFFE0708A))) { settings.setAccent("pink") }
-                    ThemeSwatch("灰色", accent == "gray", listOf(Color(0xFFBFC7D4), Color(0xFF8E96A6))) { settings.setAccent("gray") }
+                    ThemeSwatch("粉", accent == "pink", listOf(Color(0xFFFF9FB0), Color(0xFFD96E86))) { settings.setAccent("pink") }
+                    ThemeSwatch("灰蓝", accent == "blue", listOf(Color(0xFFAFC2D8), Color(0xFF7C8FA6))) { settings.setAccent("blue") }
+                    ThemeSwatch("灰", accent == "gray", listOf(Color(0xFFB9B9B9), Color(0xFF828282))) { settings.setAccent("gray") }
                 }
                 Spacer(Modifier.height(14.dp))
                 ThinDivider()
@@ -243,41 +268,6 @@ fun SettingsScreen() {
                         Text("清除", color = palette.textDim)
                     }
                 }
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
-        SectionLabel("𝒜𝓃𝓃𝒾𝓋ℯ𝓇𝓈𝒶𝓇𝓎", "纪念日")
-        Spacer(Modifier.height(8.dp))
-        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("名字", color = palette.textLight, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text(
-                        annivText.ifBlank { "纪念日" },
-                        color = palette.text,
-                        fontSize = 13.sp,
-                        modifier = Modifier.clickable { editName = true }
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("日期", color = palette.textLight, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text(
-                        if (annivDate > 0) {
-                            Instant.ofEpochMilli(annivDate).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
-                        } else "未设置",
-                        color = palette.text,
-                        fontSize = 13.sp,
-                        modifier = Modifier.clickable { pickAnnivDate = true }
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-                SegRow(
-                    options = listOf("正数", "倒数"),
-                    selected = if (annivType == "倒数") 1 else 0,
-                    onSelect = { settings.setAnnivType(if (it == 1) "倒数" else "正数") }
-                )
             }
         }
 
@@ -337,39 +327,6 @@ fun SettingsScreen() {
                 Spacer(Modifier.height(4.dp))
                 Text("· 应用时间线：系统设置 → 特殊应用权限 → 使用情况访问", color = palette.textDim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
-        SectionLabel("ℳ𝒞𝒫 𝒮ℯ𝓇𝓋ℯ𝓇", "服务")
-        Spacer(Modifier.height(8.dp))
-        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    if (running) "服务运行中 · 局域网的设备都能连" else "服务没开，工具盒现在连不上",
-                    color = if (running) palette.accent else palette.textDim,
-                    fontSize = 11.sp
-                )
-                Spacer(Modifier.height(10.dp))
-                ActionPill(
-                    text = if (running) "停止服务" else "启动服务",
-                    onClick = { if (running) stopServer() else startServer() },
-                    modifier = Modifier.fillMaxWidth(),
-                    danger = running
-                )
-                Spacer(Modifier.height(14.dp))
-                AddressRow("本机", "http://127.0.0.1:$port/mcp")
-                Spacer(Modifier.height(6.dp))
-                AddressRow("局域网", "http://$lanIp:$port/mcp")
-                Spacer(Modifier.height(12.dp))
-                ThinDivider()
-                Row(
-                    Modifier.fillMaxWidth().clickable { showLogs = true }.padding(top = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("运行日志", color = palette.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text("${logs.size} 条", color = palette.textDim, fontSize = 12.sp)
-                }
             }
         }
 
@@ -514,45 +471,22 @@ fun SettingsScreen() {
         )
     }
 
-    if (editName) {
-        TextInputDialog(
-            title = "纪念日名字",
-            initial = annivText,
-            placeholder = "比如 我们在一起",
-            onDismiss = { editName = false },
-            onSave = { settings.setAnnivText(it.ifBlank { "纪念日" }); editName = false }
-        )
-    }
-
-    if (pickAnnivDate) {
-        val initial = if (annivDate > 0) annivDate else System.currentTimeMillis()
-        val state = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = initial)
-        androidx.compose.material3.DatePickerDialog(
-            onDismissRequest = { pickAnnivDate = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    state.selectedDateMillis?.let { settings.setAnnivDate(it) }
-                    pickAnnivDate = false
-                }) { Text("确定", color = MaterialTheme.colorScheme.primary) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pickAnnivDate = false }) { Text("取消", color = palette.textDim) }
-            }
-        ) { androidx.compose.material3.DatePicker(state = state) }
-    }
-
     if (showTools) {
         AlertDialog(
             onDismissRequest = { showTools = false },
-            containerColor = palette.surface,
-            shape = RoundedCornerShape(24.dp),
-            title = { Text("工具盒 · ${ToolCatalog.tools.size} 个", color = palette.text, fontWeight = FontWeight.Medium) },
+            containerColor = palette.dialogTint,
+            shape = RoundedCornerShape(22.dp),
+            title = { Text("工具盒 · ${ToolCatalog.tools.size} 个", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(
+                    Modifier
+                        .heightIn(max = 330.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     ToolCatalog.tools.forEach { (name, desc) ->
-                        Column(Modifier.padding(vertical = 6.dp)) {
-                            Text(name, color = palette.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Text(desc, color = palette.textLight, fontSize = 11.sp)
+                        Column(Modifier.padding(bottom = 10.dp)) {
+                            Text(name, color = palette.accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                            Text(desc, color = palette.textLight, fontSize = 11.sp, lineHeight = 16.sp)
                         }
                     }
                 }
@@ -564,11 +498,15 @@ fun SettingsScreen() {
     if (showLogs) {
         AlertDialog(
             onDismissRequest = { showLogs = false },
-            containerColor = palette.surface,
-            shape = RoundedCornerShape(24.dp),
-            title = { Text("运行日志", color = palette.text, fontWeight = FontWeight.Medium) },
+            containerColor = palette.dialogTint,
+            shape = RoundedCornerShape(22.dp),
+            title = { Text("运行日志", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(
+                    Modifier
+                        .heightIn(max = 330.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     if (logs.isEmpty()) Text("暂无日志", color = palette.textLight, fontSize = 12.sp)
                     logs.reversed().forEach { Text(it, color = palette.textLight, fontSize = 11.sp, modifier = Modifier.padding(vertical = 1.dp)) }
                 }

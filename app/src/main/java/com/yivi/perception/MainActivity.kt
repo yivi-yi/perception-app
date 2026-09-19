@@ -1,5 +1,6 @@
 package com.yivi.perception
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -25,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,6 +38,8 @@ import com.yivi.perception.ui.common.GlassCard
 import com.yivi.perception.ui.common.StatementDialog
 import com.yivi.perception.ui.settings.SettingsScreen
 import com.yivi.perception.ui.theme.LocalPalette
+import androidx.core.view.WindowCompat
+import com.yivi.perception.ui.theme.LocalPalette
 import com.yivi.perception.ui.theme.PerceptionTheme
 
 class MainActivity : ComponentActivity() {
@@ -43,6 +48,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             PerceptionTheme {
+                val palette = LocalPalette.current
+                val view = LocalView.current
+                SideEffect {
+                    val window = (view.context as? Activity)?.window ?: return@SideEffect
+                    val controller = WindowCompat.getInsetsController(window, view)
+                    // 亮色主题用深色图标，暗色主题用浅色图标
+                    controller.isAppearanceLightStatusBars = !palette.isDark
+                    controller.isAppearanceLightNavigationBars = !palette.isDark
+                }
                 AppBackground { MainScreen() }
             }
         }
@@ -87,12 +101,13 @@ private fun GlassTabBar(selected: Int, onSelect: (Int) -> Unit, modifier: Modifi
     GlassCard(
         modifier = modifier,
         shape = RoundedCornerShape(50),
-        tint = palette.surface.copy(alpha = 0.7f),
+        tint = palette.surface.copy(alpha = 0.62f),
+        borderColor = palette.chipBorder.copy(alpha = 0.45f),
         showHighlight = false,
         grain = false
     ) {
         Row(
-            Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -103,11 +118,11 @@ private fun GlassTabBar(selected: Int, onSelect: (Int) -> Unit, modifier: Modifi
                         .clip(RoundedCornerShape(50))
                         .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
                         .clickable { onSelect(i) }
-                        .padding(horizontal = 18.dp, vertical = 9.dp)
+                        .padding(horizontal = 15.dp, vertical = 7.dp)
                 ) {
                     Text(
                         tab.label,
-                        fontSize = 13.sp,
+                        fontSize = 12.5.sp,
                         color = if (active) Color.White else palette.textDim,
                         fontWeight = if (active) FontWeight.Medium else FontWeight.Normal
                     )

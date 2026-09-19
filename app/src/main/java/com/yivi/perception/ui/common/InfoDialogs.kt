@@ -31,11 +31,11 @@ fun StatementDialog(onAgree: () -> Unit, onDismiss: (() -> Unit)? = null) {
             dismissOnBackPress = onDismiss != null,
             dismissOnClickOutside = onDismiss != null
         ),
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(26.dp),
-        title = { Text("使用声明", color = palette.text, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
+        containerColor = palette.dialogTint,
+        shape = RoundedCornerShape(22.dp),
+        title = { Text("使用声明", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
         text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 Text(STATEMENT, color = palette.textLight, fontSize = 12.5.sp, lineHeight = 20.sp)
             }
         },
@@ -55,11 +55,11 @@ fun UsageDialog(onDismiss: () -> Unit) {
     val palette = LocalPalette.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(26.dp),
-        title = { Text("使用说明", color = palette.text, fontSize = 17.sp, fontWeight = FontWeight.Medium) },
+        containerColor = palette.dialogTint,
+        shape = RoundedCornerShape(22.dp),
+        title = { Text("使用说明", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
         text = {
-            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 UsageSection("日历", "点日期看那天的事，点数字右边的月历翻月；有安排的日子底下有个小点。点「＋ 添加日程」写一条，要提醒就把开关打开，到点会弹通知。")
                 UsageSection("纪念日", "左边那张卡点一下就能改名字、选日期、切正数还是倒数。")
                 UsageSection("闹钟", "上面是大时钟，下面是闹钟条。到点会一直响到你点通知上的「暂停」或「关闭」；点「暂停」是 5 分钟后再响一次，「关闭」就停。重复可以选每天 / 工作日 / 周末 / 自己挑星期。长按一条可以删。")

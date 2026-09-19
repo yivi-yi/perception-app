@@ -59,6 +59,48 @@ class HttpMcpServer(private val engine: McpEngine) {
     fun start(port: Int, onReady: (Int) -> Unit) {
         if (httpd != null) return
         val server = object : NanoHTTPD(port) {
+
+            /**
+             * GET 上的 SSE 流。NanoHTTPD 的 newChunkedResponse 是 protected 静态方法，
+             * 用反射拿一下（拿不到就退回一条普通的 SSE 响应，至少不会再回 405）。
+             */
+            private fun sse(): Response {
+                return try {
+                    val method = NanoHTTPD::class.java.getDeclaredMethod(
+                        "newChunkedResponse",
+                        Response.IStatus::class.java,
+                        String::class.java,
+                        java.io.InputStream::class.java
+                    )
+                    method.isAccessible = true
+                    val out = java.io.PipedOutputStream()
+                    val input = java.io.PipedInputStream(out, 8192)
+                    val thread = Thread {
+                        try {
+                            out.write(": perception ready\n\n".toByteArray())
+                            out.flush()
+                            var beats = 0
+                            while (beats < 40) {
+                                Thread.sleep(15000)
+                                out.write(": ping\n\n".toByteArray())
+                                out.flush()
+                                beats++
+                            }
+                        } catch (_: Exception) {
+                            // 客户端走了
+                        } finally {
+                            runCatching { out.close() }
+                        }
+                    }
+                    thread.isDaemon = true
+                    thread.start()
+                    cors(method.invoke(null, Response.Status.OK, "text/event-stream", input) as Response)
+                } catch (e: Exception) {
+                    log("SSE 流没挂上（${e.message}），回一条普通的")
+                    cors(newFixedLengthResponse(Response.Status.OK, "text/event-stream", ": perception ready\n\n"))
+                }
+            }
+
             override fun serve(session: IHTTPSession): Response {
                 val path = session.uri.trimEnd('/').ifBlank { "/" }
                 val isPost = session.method == Method.POST
@@ -154,7 +196,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                     (path == "/mcp" || path == "/") && session.method == Method.GET -> {
                         // 有些客户端会开一条 GET 的 SSE 流等服务器消息；我们不推消息，就发心跳挂着
                         log("GET $path → 200 SSE 流（Accept: ${accept.ifBlank { "无" }}）")
-                        sseStream()
+                        sse()
                     }
 
                     (path == "/mcp" || path == "/") && session.method == Method.DELETE -> {
@@ -195,32 +237,6 @@ class HttpMcpServer(private val engine: McpEngine) {
         }
         httpd = null
         log("服务停了")
-    }
-
-    /** GET 上的 SSE 流：发心跳挂着，客户端断开就自己结束 */
-    private fun sseStream(): Response {
-        val out = java.io.PipedOutputStream()
-        val input = java.io.PipedInputStream(out, 8192)
-        val thread = Thread {
-            try {
-                out.write(": perception ready\n\n".toByteArray())
-                out.flush()
-                var beats = 0
-                while (beats < 40) {
-                    Thread.sleep(15000)
-                    out.write(": ping\n\n".toByteArray())
-                    out.flush()
-                    beats++
-                }
-            } catch (_: Exception) {
-                // 客户端走了
-            } finally {
-                runCatching { out.close() }
-            }
-        }
-        thread.isDaemon = true
-        thread.start()
-        return cors(newChunkedResponse(Response.Status.OK, "text/event-stream", input))
     }
 
     private fun cors(r: Response): Response {

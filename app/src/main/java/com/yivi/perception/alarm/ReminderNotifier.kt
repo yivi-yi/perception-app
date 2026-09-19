@@ -37,7 +37,7 @@ object ReminderNotifier {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("📌 ${event.title.ifBlank { "日程提醒" }}")
+            .setContentTitle(event.title.ifBlank { "日程提醒" })
             .setContentText(event.note.ifBlank { timeText(event.time) })
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)

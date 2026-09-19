@@ -108,6 +108,7 @@ fun SettingsScreen() {
     var showTools by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var clearStep by remember { mutableStateOf(0) }
+    val plainText by settings.toolPlainText.collectAsState()
     var selfTestRunning by remember { mutableStateOf(false) }
     var selfTestResult by remember { mutableStateOf<String?>(null) }
     var editCity by remember { mutableStateOf(false) }
@@ -384,6 +385,25 @@ fun SettingsScreen() {
                         Text("给别的 AI 调的本机工具", color = palette.textDim, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
                     }
                     Text("${Tools.all.size} 个", color = palette.accent, fontSize = 12.sp)
+                }
+                ThinDivider()
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("工具返回格式", color = palette.text, fontSize = 13.sp)
+                        Text(
+                            if (plainText) "文字（省位置）" else "JSON（原样）",
+                            color = palette.textDim, fontSize = 10.5.sp, modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    SegRow(
+                        options = listOf("文字", "JSON"),
+                        selected = if (plainText) 0 else 1,
+                        onSelect = { settings.setToolPlainText(it == 0) },
+                        modifier = Modifier.width(126.dp)
+                    )
                 }
             }
         }

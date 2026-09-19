@@ -36,12 +36,25 @@ class NotificationListener : NotificationListenerService() {
                         "app" to sbn.packageName,
                         "title" to title,
                         "text" to text,
-                        "time" to sbn.postTime.toString()
+                        "time" to humanTime(sbn.postTime)
                     )
                 }?.takeLast(limit.coerceIn(1, MAX)) ?: emptyList()
             } catch (e: Exception) {
                 emptyList()
             }
+        }
+
+        /** 毫秒时间戳换成"14:32（3 分钟前）"，别把一串数字丢给模型 */
+        fun humanTime(millis: Long): String {
+            val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            val minutes = ((System.currentTimeMillis() - millis) / 60000L).coerceAtLeast(0)
+            val ago = when {
+                minutes < 1 -> "刚刚"
+                minutes < 60 -> "${minutes} 分钟前"
+                minutes < 24 * 60 -> "${minutes / 60} 小时前"
+                else -> "${minutes / (24 * 60)} 天前"
+            }
+            return fmt.format(java.util.Date(millis)) + "（$ago）"
         }
 
         private fun isNoise(pkg: String?, joined: String): Boolean {

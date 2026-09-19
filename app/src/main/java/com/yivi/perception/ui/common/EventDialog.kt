@@ -89,8 +89,8 @@ fun ScheduleDialog(
                     label = { Text("备注（可空）") }, singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SoftPill("📅 ${date.format(dateFmt)}") { showDate = true }
-                    SoftPill("⏰ %02d:%02d".format(hour, minute)) { showTime = true }
+                    SoftPill(date.format(dateFmt)) { showDate = true }
+                    SoftPill("%02d:%02d".format(hour, minute)) { showTime = true }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("到点提醒", color = palette.textLight, fontSize = 13.sp, modifier = Modifier.weight(1f))
@@ -120,21 +120,11 @@ fun ScheduleDialog(
     )
 
     if (showDate) {
-        val state = rememberDatePickerState(
-            initialSelectedDateMillis = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        MiniDatePicker(
+            initial = date,
+            onPick = { picked -> date = picked; showDate = false },
+            onDismiss = { showDate = false }
         )
-        DatePickerDialog(
-            onDismissRequest = { showDate = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    state.selectedDateMillis?.let { ms ->
-                        date = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
-                    }
-                    showDate = false
-                }) { Text("确定", color = MaterialTheme.colorScheme.primary) }
-            },
-            dismissButton = { TextButton(onClick = { showDate = false }) { Text("取消", color = palette.textDim) } }
-        ) { DatePicker(state = state) }
     }
 
     if (showTime) {

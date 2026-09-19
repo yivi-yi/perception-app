@@ -67,236 +67,43 @@ class NativeToolkit(
 
     @Suppress("DEPRECATION")
     suspend fun network(): Map<String, Any> = withContext(Dispatchers.IO) {
+        val out = mutableMapOf<String, Any>()
+
+        // IP 从网卡读。别用 WifiManager.ipAddress：安卓 13 上它恒为 0，才显示成 0.0.0.0
+        val ips = com.yivi.perception.service.NetworkUtils.allIps()
+        out["ip"] = if (ips.isEmpty()) "没连到局域网（可能只有移动数据）" else ips.joinToString(" / ")
+
+        val fine = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
         try {
             val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
             val info = runCatching { wm.connectionInfo }.getOrNull()
-            val ssid = info?.ssid?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
-            mapOf(
-                "ok" to true,
-                "ssid" to (ssid ?: "读不到 WiFi 名（安卓 10 以上要定位权限）"),
-                "rssi" to (info?.rssi ?: 0),
-                "ip" to android.text.format.Formatter.formatIpAddress(info?.ipAddress ?: 0)
-            )
+            val ssid = info?.ssid?.replace("\"", "")?.trim()
+            out["wifi_ssid"] = when {
+                !fine -> "读不到 WiFi 名：要「定位」权限（安卓 10 起的规定）"
+                ssid.isNullOrBlank() || ssid == "<unknown ssid>" -> "没连 WiFi（或者系统不给读）"
+                else -> ssid
+            }
+            if (fine && !ssid.isNullOrBlank() && ssid != "<unknown ssid>") {
+                out["wifi_signal"] = info?.rssi ?: 0
+            }
         } catch (e: Exception) {
-            mapOf("ok" to false, "error" to (e.message ?: "读不到网络信息"))
-        }
-    }
-
-    /** 最近一次定位；能拿到实时的就标 realtime=true，否则会说清是多久前的 */
-    suspend fun location(): Map<String, Any> = withContext(Dispatchers.IO) {
-        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
-            !hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
-        ) {
-            return@withContext mapOf("ok" to false, "error" to "没给定位权限，去应用设置里开一下")
-        }
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-            ?: return@withContext mapOf("ok" to false, "error" to "这台设备没有定位服务")
-
-        var loc: Location? = null
-        var realtime = false
-        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
-            val got = currentLocation(lm, provider)
-            if (got != null) {
-                loc = got
-                realtime = true
-                break
-            }
-        }
-        if (loc == null) {
-            for (provider in listOf(
-                LocationManager.GPS_PROVIDER,
-                LocationManager.NETWORK_PROVIDER,
-                LocationManager.PASSIVE_PROVIDER
-            )) {
-                loc = runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
-                if (loc != null) break
-            }
+            out["wifi_ssid"] = "读不到：${e.message ?: "系统限制"}"
         }
 
-        val fix = loc ?: return@withContext mapOf("ok" to false, "error" to "没拿到定位（可能从来没定过位）")
-        val ageMinutes = ((System.currentTimeMillis() - fix.time) / 60000L).toInt()
-        mapOf(
-            "ok" to true,
-            "realtime" to realtime,
-            "lat" to fix.latitude,
-            "lng" to fix.longitude,
-            "provider" to (fix.provider ?: ""),
-            "age_minutes" to ageMinutes,
-            "address" to reverseGeocode(fix.latitude, fix.longitude),
-            "note" to if (realtime) "本次是实时定位" else "不是实时，是最近一次定位，约 $ageMinutes 分钟前"
-        )
-    }
-
-    private fun currentLocation(lm: LocationManager, provider: String): Location? = try {
-        if (lm.getProvider(provider) == null) {
-            null
-        } else {
-            val latch = CountDownLatch(1)
-            var result: Location? = null
-            lm.getCurrentLocation(provider, null, context.mainExecutor) { l ->
-                result = l
-                latch.countDown()
-            }
-            latch.await(6, TimeUnit.SECONDS)
-            result
-        }
-    } catch (e: Exception) {
-        null
-    }
-
-    @Suppress("DEPRECATION")
-    private fun reverseGeocode(lat: Double, lng: Double): String {
         try {
-            val geocoder = Geocoder(context, Locale.getDefault())
-            val list = geocoder.getFromLocation(lat, lng, 1)
-            val addr = list?.firstOrNull()?.let { a ->
-                listOfNotNull(a.adminArea, a.locality, a.subLocality, a.thoroughfare, a.subThoroughfare)
-                    .joinToString("")
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            out["type"] = when {
+                caps == null -> "没网"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "WiFi"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "移动数据"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> "有线"
+                else -> "其它"
             }
-            if (!addr.isNullOrBlank()) return addr
-        } catch (e: Exception) {
-        }
-        val text = httpGet(
-            "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=$lat&longitude=$lng&localityLanguage=zh",
-            8000
-        )
-        val j = jsonObj(text) ?: return ""
-        return listOfNotNull(
-            j["countryName"].strOrNull(),
-            j["principalSubdivision"].strOrNull(),
-            j["city"].strOrNull(),
-            j["locality"].strOrNull()
-        ).distinct().joinToString(" ")
-    }
-
-    /** 天气：不给城市就用最近定位，数据来自 open-meteo（不用 key） */
-    suspend fun weather(city: String?, source: String?): Map<String, Any> = withContext(Dispatchers.IO) {
-        var lat: Double
-        var lng: Double
-        var place = ""
-
-        // 默认只给当前天气；传 forecast 才带上未来三天
-        val wantForecast = (source ?: "").equals("forecast", ignoreCase = true)
-
-        // 没指定城市就用设置里的默认城市；连默认城市都没有才用定位
-        val wanted = city?.takeIf { it.isNotBlank() } ?: settings.weatherCity.value.takeIf { it.isNotBlank() }
-
-        if (wanted != null) {
-            val geo = jsonObj(
-                httpGet(
-                    "https://geocoding-api.open-meteo.com/v1/search?name=${encode(wanted)}&count=1&language=zh&format=json",
-                    10000
-                )
-            )
-            val first = geo?.get("results")?.asArray()?.firstOrNull()?.jsonObject
-                ?: return@withContext mapOf("ok" to false, "error" to "找不到城市「$wanted」")
-            lat = first["latitude"].numOrNull() ?: return@withContext mapOf("ok" to false, "error" to "城市坐标没拿到")
-            lng = first["longitude"].numOrNull() ?: 0.0
-            place = listOfNotNull(first["name"].strOrNull(), first["admin1"].strOrNull()).distinct().joinToString(" ")
-        } else {
-            val fix = lastFix() ?: return@withContext mapOf(
-                "ok" to false,
-                "error" to "没传城市、设置里也没有默认城市、又定位不到：三个里给一个就行"
-            )
-            lat = fix.first
-            lng = fix.second
-            place = "当前位置"
+        } catch (_: Exception) {
         }
 
-        val text = httpGet(
-            "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lng" +
-                "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m" +
-                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
-                "&timezone=auto&forecast_days=3",
-            12000
-        )
-        val root = jsonObj(text)
-            ?: return@withContext weatherFallback(lat, lng, place, wantForecast)
-                ?: mapOf("ok" to false, "error" to "天气接口都没通，检查一下手机能不能上网")
-        val cur = root["current"]?.jsonObject
-        val daily = root["daily"]?.jsonObject
-
-        val days = mutableListOf<Map<String, Any>>()
-        val dates = daily?.get("time")?.asArray()
-        if (dates != null && wantForecast) {
-            dates.forEachIndexed { i, d ->
-                days.add(
-                    mapOf(
-                        "date" to (d.strOrNull() ?: ""),
-                        "weather" to weatherText(daily["weather_code"].asArray()?.getOrNull(i)?.numOrNull()?.toInt()),
-                        "min" to (daily["temperature_2m_min"].asArray()?.getOrNull(i)?.numOrNull() ?: 0.0),
-                        "max" to (daily["temperature_2m_max"].asArray()?.getOrNull(i)?.numOrNull() ?: 0.0),
-                        "rain_prob" to (daily["precipitation_probability_max"].asArray()?.getOrNull(i)?.numOrNull() ?: 0.0)
-                    )
-                )
-            }
-        }
-
-        mapOf(
-            "ok" to true,
-            "place" to place,
-            "now" to mapOf(
-                "temp" to (cur?.get("temperature_2m")?.numOrNull() ?: 0.0),
-                "feels_like" to (cur?.get("apparent_temperature")?.numOrNull() ?: 0.0),
-                "humidity" to (cur?.get("relative_humidity_2m")?.numOrNull() ?: 0.0),
-                "wind" to (cur?.get("wind_speed_10m")?.numOrNull() ?: 0.0),
-                "weather" to weatherText(cur?.get("weather_code")?.numOrNull()?.toInt())
-            ),
-            "days" to days
-        )
-    }
-
-    /** 备用天气源：wttr.in，也不用 key */
-    private fun weatherFallback(lat: Double, lng: Double, place: String, wantForecast: Boolean): Map<String, Any>? {
-        val root = jsonObj(httpGet("https://wttr.in/$lat,$lng?format=j1", 12000)) ?: return null
-        val cur = root["current_condition"]?.asArray()?.firstOrNull()?.jsonObject ?: return null
-        val days = if (!wantForecast) emptyList() else root["weather"]?.asArray()?.take(3)?.map { d ->
-            val o = d.jsonObject
-            val noon = o["hourly"].asArray()?.getOrNull(4)?.jsonObject
-            mapOf(
-                "date" to (o["date"].strOrNull() ?: ""),
-                "weather" to (noon?.get("weatherDesc").asArray()?.firstOrNull()?.jsonObject?.get("value").strOrNull() ?: ""),
-                "min" to ((o["mintempC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
-                "max" to ((o["maxtempC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
-                "rain_prob" to ((noon?.get("chanceofrain").strOrNull() ?: "0").toDoubleOrNull() ?: 0.0)
-            )
-        } ?: emptyList()
-
-        return mapOf(
-            "ok" to true,
-            "place" to place,
-            "source" to "wttr.in（备用源）",
-            "now" to mapOf(
-                "temp" to ((cur["temp_C"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
-                "feels_like" to ((cur["FeelsLikeC"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
-                "humidity" to ((cur["humidity"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
-                "wind" to ((cur["windspeedKmph"].strOrNull() ?: "0").toDoubleOrNull() ?: 0.0),
-                "weather" to (cur["weatherDesc"].asArray()?.firstOrNull()?.jsonObject?.get("value").strOrNull() ?: "")
-            ),
-            "days" to days
-        )
-    }
-
-    private suspend fun lastFix(): Pair<Double, Double>? = withContext(Dispatchers.IO) {
-        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
-            !hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
-        ) return@withContext null
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return@withContext null
-        var loc: Location? = null
-        for (provider in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
-            val got = currentLocation(lm, provider)
-            if (got != null) {
-                loc = got
-                break
-            }
-        }
-        if (loc == null) {
-            for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
-                loc = runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
-                if (loc != null) break
-            }
-        }
-        loc?.let { it.latitude to it.longitude }
+        mapOf("ok" to true).plus(out)
     }
 
     // ── 传感器 ──────────────────────────────────────
@@ -319,9 +126,11 @@ class NativeToolkit(
         val out = mutableMapOf<String, Any>()
 
         if (kind == "all" || kind == "light") {
-            val v = readOnce(sm, Sensor.TYPE_LIGHT)
-            if (v != null) {
-                val lux = v[0]
+            // 光感很多机器第一帧是 0，取中位数：开灯却报"很暗"就是这个坑
+            val lux = readSamples(sm, Sensor.TYPE_LIGHT).map { it[0] }.sorted().let {
+                if (it.isEmpty()) null else it[it.size / 2]
+            }
+            if (lux != null) {
                 out["light_lux"] = lux
                 out["light"] = when {
                     lux < 10 -> "很暗"
@@ -332,26 +141,32 @@ class NativeToolkit(
             }
         }
         if (kind == "all" || kind == "proximity") {
-            val v = readOnce(sm, Sensor.TYPE_PROXIMITY)
+            val v = readSamples(sm, Sensor.TYPE_PROXIMITY).lastOrNull()
             if (v != null) {
                 val max = sm.getDefaultSensor(Sensor.TYPE_PROXIMITY)?.maximumRange ?: 1f
                 out["proximity"] = if (v[0] < max) "贴近（可能在口袋或耳边）" else "远离"
             }
         }
         if (kind == "all" || kind == "motion") {
-            val v = readOnce(sm, Sensor.TYPE_ACCELEROMETER)
-            if (v != null) {
-                val g = kotlin.math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) / SensorManager.GRAVITY_EARTH
-                out["motion_g"] = g
+            // 加速度计：单看一帧判不出动静，要在一小段时间里看抖动
+            val samples = readSamples(sm, Sensor.TYPE_ACCELEROMETER)
+            if (samples.isNotEmpty()) {
+                val gs = samples.map {
+                    kotlin.math.sqrt(it[0] * it[0] + it[1] * it[1] + it[2] * it[2]) / SensorManager.GRAVITY_EARTH
+                }
+                val mean = gs.average().toFloat()
+                val jitter = (gs.max() - gs.min())
+                out["motion_g"] = (Math.round(mean * 100) / 100.0)
+                out["motion_wobble"] = (Math.round(jitter * 100) / 100.0)
                 out["motion"] = when {
-                    g < 1.15f -> "放着没动"
-                    g < 1.8f -> "轻轻动着"
+                    jitter < 0.05f -> "放着没动"
+                    jitter < 0.40f -> "轻轻动着"
                     else -> "在晃"
                 }
             }
         }
         if (kind == "all" || kind == "direction") {
-            val v = readOnce(sm, Sensor.TYPE_ROTATION_VECTOR)
+            val v = readSamples(sm, Sensor.TYPE_ROTATION_VECTOR).lastOrNull()
             if (v != null) {
                 val rm = FloatArray(9)
                 val ori = FloatArray(3)
@@ -372,19 +187,19 @@ class NativeToolkit(
             }
         }
         if (kind == "all" || kind == "pressure") {
-            val v = readOnce(sm, Sensor.TYPE_PRESSURE)
+            val v = readSamples(sm, Sensor.TYPE_PRESSURE).lastOrNull()
             if (v != null) out["pressure_hpa"] = v[0]
         }
         if (kind == "all" || kind == "humidity") {
-            val v = readOnce(sm, Sensor.TYPE_RELATIVE_HUMIDITY)
+            val v = readSamples(sm, Sensor.TYPE_RELATIVE_HUMIDITY).lastOrNull()
             if (v != null) out["humidity_percent"] = v[0]
         }
         if (kind == "all" || kind == "temperature") {
-            val v = readOnce(sm, Sensor.TYPE_AMBIENT_TEMPERATURE)
+            val v = readSamples(sm, Sensor.TYPE_AMBIENT_TEMPERATURE).lastOrNull()
             if (v != null) out["temperature_c"] = v[0]
         }
         if (kind == "all" || kind == "magnetic") {
-            val v = readOnce(sm, Sensor.TYPE_MAGNETIC_FIELD)
+            val v = readSamples(sm, Sensor.TYPE_MAGNETIC_FIELD).lastOrNull()
             if (v != null) {
                 out["magnetic_ut"] = kotlin.math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
             }
@@ -393,38 +208,52 @@ class NativeToolkit(
             if (!hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)) {
                 out["steps"] = "没给活动识别权限，读不了步数"
             } else {
-                val v = readOnce(sm, Sensor.TYPE_STEP_COUNTER)
+                val v = readSamples(sm, Sensor.TYPE_STEP_COUNTER).lastOrNull()
                 if (v != null) out["steps_since_boot"] = v[0].toInt()
             }
         }
 
         if (out.isEmpty()) {
-            mapOf("ok" to false, "error" to "这个传感器读不到（设备可能没有）")
+            mapOf(
+                "ok" to false,
+                "error" to "没读到你要的那几路（kind=$kind）：要么这台机器没这个传感器，要么它只在发生变化时才上报（比如步数要边走边读）"
+            )
         } else {
             mapOf("ok" to true).plus(out)
         }
     }
 
-    private fun readOnce(sm: SensorManager, type: Int, timeoutMs: Long = 1500): FloatArray? {
-        val sensor = sm.getDefaultSensor(type) ?: return null
-        val latch = CountDownLatch(1)
-        var values: FloatArray? = null
+    /**
+     * 采集一小段时间的传感器数据（不是只取第一帧）。
+     * 光感/步数这类传感器有时只在变化或走路时上报，采不到就返回空，由调用方说明。
+     */
+    private fun readSamples(sm: SensorManager, type: Int, windowMs: Long = 700, maxSamples: Int = 24): List<FloatArray> {
+        val sensor = sm.getDefaultSensor(type) ?: return emptyList()
+        val samples = mutableListOf<FloatArray>()
+        val lock = Object()
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                values = event.values.clone()
-                latch.countDown()
+                synchronized(lock) {
+                    if (samples.size < maxSamples) samples.add(event.values.clone())
+                    lock.notifyAll()
+                }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
         return try {
-            sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_FASTEST)
-            latch.await(timeoutMs, TimeUnit.MILLISECONDS)
-            sm.unregisterListener(listener)
-            values
+            sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
+            val end = System.currentTimeMillis() + windowMs
+            synchronized(lock) {
+                while (samples.size < 3 && System.currentTimeMillis() < end) {
+                    lock.wait(60)
+                }
+            }
+            synchronized(lock) { samples.toList() }
         } catch (e: Exception) {
+            emptyList()
+        } finally {
             runCatching { sm.unregisterListener(listener) }
-            null
         }
     }
 
@@ -460,11 +289,36 @@ class NativeToolkit(
     }
 
     fun currentApp(): Map<String, Any> {
-        val pkg = PermissionService.lastPackage
+        val svc = PermissionService.service
+        // 优先问无障碍服务"当前活动的那个窗口"，这才是实时的；lastPackage 只是最后一次窗口变化事件，会慢一拍
+        val live = runCatching {
+            svc?.windows?.firstOrNull { it.isActive && it.isFocused }
+                ?: svc?.windows?.firstOrNull { it.isActive }
+        }.getOrNull()
+        val livePkg = runCatching { live?.root?.packageName?.toString() }.getOrNull()
+        val pkg = livePkg?.takeIf { it.isNotBlank() } ?: PermissionService.lastPackage
         if (pkg.isNullOrBlank()) {
             return mapOf("ok" to false, "error" to "没开无障碍，或者还没捕捉到前台应用")
         }
-        return mapOf("ok" to true, "app" to appLabel(pkg), "package" to pkg)
+        val out = mutableMapOf<String, Any>(
+            "ok" to true,
+            "app" to appLabel(pkg),
+            "package" to pkg,
+            "source" to if (livePkg != null) "实时（无障碍当前窗口）" else "最后一次窗口变化事件，可能慢一拍"
+        )
+        // 有输入法/系统弹窗盖在上面时，报的是它们——这不是 bug，但得说清楚
+        val onTop = runCatching {
+            svc?.windows
+                ?.filter {
+                    it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
+                        it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM
+                }
+                ?.mapNotNull { it.root?.packageName?.toString() }
+        }.getOrNull()
+        if (!onTop.isNullOrEmpty()) {
+            out["盖在上面的窗口"] = onTop.distinct().joinToString(", ")
+        }
+        return out
     }
 
     /**
@@ -584,10 +438,16 @@ class NativeToolkit(
             "volume" to mapOf(
                 "music" to level(android.media.AudioManager.STREAM_MUSIC),
                 "ring" to level(android.media.AudioManager.STREAM_RING),
-                "notification" to level(android.media.AudioManager.STREAM_NOTIFICATION),
+                "notification" to run {
+                    val n = level(android.media.AudioManager.STREAM_NOTIFICATION)
+                    // 有些机型（一加/OPPO 这类）通知音跟铃声共用一路，单读通知会是 0
+                    if (n == 0 && level(android.media.AudioManager.STREAM_RING) > 0) {
+                        level(android.media.AudioManager.STREAM_RING)
+                    } else n
+                },
                 "alarm" to level(android.media.AudioManager.STREAM_ALARM)
             ),
-            "note" to "音量是百分比（0-100）"
+            "note" to "音量是百分比（0-100）。通知跟铃声共用一个音量时，这里通知显示的就是铃声那路"
         )
     }
 
@@ -671,9 +531,17 @@ class NativeToolkit(
                 else -> android.media.AudioManager.STREAM_MUSIC
             }
             try {
-                val max = am.getStreamMaxVolume(target).coerceAtLeast(1)
-                val v = (level.coerceIn(0, 100) * max + 50) / 100
-                am.setStreamVolume(target, v, 0)
+                run {
+                    val max = am.getStreamMaxVolume(target).coerceAtLeast(1)
+                    val v = (level.coerceIn(0, 100) * max + 50) / 100
+                    am.setStreamVolume(target, v, 0)
+                }
+                // 通知跟铃声共用的机型：单设通知那路没声音，把铃声那路一起设上
+                if (target == android.media.AudioManager.STREAM_NOTIFICATION) {
+                    val ringMax = am.getStreamMaxVolume(android.media.AudioManager.STREAM_RING).coerceAtLeast(1)
+                    val ringV = (level.coerceIn(0, 100) * ringMax + 50) / 100
+                    am.setStreamVolume(android.media.AudioManager.STREAM_RING, ringV, 0)
+                }
                 done.add("音量=${level.coerceIn(0, 100)}%")
             } catch (e: Exception) {
                 return@withContext mapOf("ok" to false, "error" to (e.message ?: "改音量失败"))

@@ -129,10 +129,10 @@ class HttpMcpServer(private val engine: McpEngine) {
                     }
                     thread.isDaemon = true
                     thread.start()
-                    cors(method.invoke(null, Response.Status.OK, "text/event-stream", input) as Response)
+                    cors(method.invoke(null, Response.Status.OK, "text/event-stream; charset=utf-8", input) as Response)
                 } catch (e: Exception) {
                     log("SSE 流没挂上（${e.message}），回一条普通的")
-                    cors(newFixedLengthResponse(Response.Status.OK, "text/event-stream", "retry: 1000\n\n"))
+                    cors(newFixedLengthResponse(Response.Status.OK, "text/event-stream; charset=utf-8", "retry: 1000\n\n"))
                 }
             }
 
@@ -140,7 +140,7 @@ class HttpMcpServer(private val engine: McpEngine) {
             private fun rpcError(status: Response.IStatus, code: Int, message: String): Response =
                 cors(
                     newFixedLengthResponse(
-                        status, "application/json",
+                        status, "application/json; charset=utf-8",
                         json.encodeToString(JsonElement.serializer(), buildJsonObject {
                             put("jsonrpc", JsonPrimitive("2.0"))
                             put("id", JsonNull)
@@ -189,7 +189,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                         }
                         cors(
                             newFixedLengthResponse(
-                                Response.Status.OK, "application/json",
+                                Response.Status.OK, "application/json; charset=utf-8",
                                 json.encodeToString(JsonElement.serializer(), body)
                             )
                         )
@@ -223,12 +223,12 @@ class HttpMcpServer(private val engine: McpEngine) {
                             request == null ->
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
 
-                            !accept.contains("application/json") || !accept.contains("text/event-stream") -> {
+                            !accept.contains("application/json; charset=utf-8") || !accept.contains("text/event-stream; charset=utf-8") -> {
                                 log("POST $path → 406 Accept 不对（$accept）")
                                 rpcError(Response.Status.NOT_ACCEPTABLE, -32600, "Not Acceptable: Client must accept both application/json and text/event-stream")
                             }
 
-                            contentType.isNotBlank() && !contentType.contains("application/json") -> {
+                            contentType.isNotBlank() && !contentType.contains("application/json; charset=utf-8") -> {
                                 log("POST $path → 415 Content-Type 不对（$contentType）")
                                 rpcError(Response.Status.UNSUPPORTED_MEDIA_TYPE, -32600, "Unsupported Media Type: Content-Type must be application/json")
                             }
@@ -274,18 +274,18 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 val text = json.encodeToString(JsonElement.serializer(), resp)
                                 val bad = resp["error"] != null
                                 // 官方默认用 SSE 回请求结果；客户端不接受 SSE 才回 JSON
-                                val asSse = accept.contains("text/event-stream")
+                                val asSse = accept.contains("text/event-stream; charset=utf-8")
                                 log("POST $path → 200 $name（回 ${if (asSse) "SSE" else "JSON"}）${if (bad) "（报错：${resp["error"]}）" else ""}")
                                 log("响应体：${text.take(200)}")
                                 if (asSse) {
                                     cors(
                                         newFixedLengthResponse(
-                                            Response.Status.OK, "text/event-stream",
+                                            Response.Status.OK, "text/event-stream; charset=utf-8",
                                             "event: message\ndata: $text\n\n"
                                         )
                                     )
                                 } else {
-                                    cors(newFixedLengthResponse(Response.Status.OK, "application/json", text))
+                                    cors(newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", text))
                                 }
                             }
                         }
@@ -340,15 +340,28 @@ class HttpMcpServer(private val engine: McpEngine) {
         return r
     }
 
+    /**
+     * 自己按 UTF-8 读 body。
+     * 不能用 session.parseBody()：Content-Type 里没写 charset 时，NanoHTTPD 会按默认的
+     * US-ASCII 解码，中文全变问号——「传中文变乱码、写进去读回来是����」就是这个原因。
+     */
     private fun readBody(session: IHTTPSession): String = try {
-        val body = HashMap<String, String>()
-        session.parseBody(body)
-        body["postData"] ?: ""
-    } catch (e: Exception) {
-        try {
-            session.inputStream?.bufferedReader()?.readText() ?: ""
-        } catch (_: Exception) {
-            ""
+        val len = session.headers["content-length"]?.trim()?.toIntOrNull() ?: -1
+        val stream = session.inputStream ?: return ""
+        val bytes = if (len > 0) {
+            val buf = ByteArray(len)
+            var read = 0
+            while (read < len) {
+                val n = stream.read(buf, read, len - read)
+                if (n <= 0) break
+                read += n
+            }
+            buf.copyOf(read)
+        } else {
+            stream.readBytes()
         }
+        String(bytes, Charsets.UTF_8)
+    } catch (e: Exception) {
+        ""
     }
 }

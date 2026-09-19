@@ -57,6 +57,7 @@ import com.yivi.perception.ui.common.PillButton
 import com.yivi.perception.ui.common.ScheduleDialog
 import com.yivi.perception.ui.common.SectionLabel
 import com.yivi.perception.ui.common.TextInputDialog
+import com.yivi.perception.ui.common.MiniDatePicker
 import com.yivi.perception.ui.theme.LocalPalette
 import com.yivi.perception.ui.theme.Palette
 import java.time.DayOfWeek
@@ -425,23 +426,14 @@ private fun AnnivEditDialog(
     )
 
     if (showDate) {
-        val state = androidx.compose.material3.rememberDatePickerState(
-            initialSelectedDateMillis = current.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        )
-        androidx.compose.material3.DatePickerDialog(
-            onDismissRequest = { showDate = false },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    state.selectedDateMillis?.let { onSetDate(it) }
-                    showDate = false
-                }) { Text("确定", color = MaterialTheme.colorScheme.primary) }
+        MiniDatePicker(
+            initial = current,
+            onPick = { picked ->
+                onSetDate(picked.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
+                showDate = false
             },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showDate = false }) {
-                    Text("取消", color = palette.textDim)
-                }
-            }
-        ) { androidx.compose.material3.DatePicker(state = state) }
+            onDismiss = { showDate = false }
+        )
     }
 }
 

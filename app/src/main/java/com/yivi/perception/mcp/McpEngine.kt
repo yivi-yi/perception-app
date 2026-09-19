@@ -2,6 +2,7 @@ package com.yivi.perception.mcp
 
 import com.yivi.perception.NativeToolkit
 import com.yivi.perception.data.ToolSpec
+import com.yivi.perception.data.ToolText
 import com.yivi.perception.data.Tools
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -161,7 +162,13 @@ class McpEngine(
         }
 
         val failed = out is Map<*, *> && (out["error"] != null || out["ok"] == false)
-        return json.encodeToString(JsonElement.serializer(), toJson(out)) to failed
+        // 默认拍成纯文字（省位置）；设置里可以切回 JSON
+        val text = if (settings.toolPlainText.value) {
+            ToolText.plain(out)
+        } else {
+            json.encodeToString(JsonElement.serializer(), toJson(out))
+        }
+        return text to failed
     }
 
     private fun toJson(m: Any?): JsonElement = when (m) {

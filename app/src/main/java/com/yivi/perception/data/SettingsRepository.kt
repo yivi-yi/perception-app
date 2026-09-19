@@ -30,6 +30,9 @@ class SettingsRepository(context: Context) {
     private val _bootStart = MutableStateFlow(prefs.getBoolean("bootStart", true))
     val bootStart: StateFlow<Boolean> get() = _bootStart
 
+    private val _toolPlainText = MutableStateFlow(prefs.getBoolean("toolPlainText", true))
+    val toolPlainText: StateFlow<Boolean> get() = _toolPlainText
+
     private val _weatherCity = MutableStateFlow(prefs.getString("weatherCity", "") ?: "")
     val weatherCity: StateFlow<String> get() = _weatherCity
 
@@ -45,6 +48,8 @@ class SettingsRepository(context: Context) {
     fun setAnnivText(v: String) { _annivText.value = v; prefs.edit().putString("annivText", v).apply() }
     fun setAnnivType(v: String) { _annivType.value = v; prefs.edit().putString("annivType", v).apply() }
     fun setAnnivDate(v: Long) { _annivDate.value = v; prefs.edit().putLong("annivDate", v).apply() }
+    fun setToolPlainText(v: Boolean) { _toolPlainText.value = v; prefs.edit().putBoolean("toolPlainText", v).apply() }
+
     fun setWeatherCity(v: String) { _weatherCity.value = v; prefs.edit().putString("weatherCity", v).apply() }
 
     fun setNoticeAgreed(v: Boolean) { _noticeAgreed.value = v; prefs.edit().putBoolean("noticeAgreed", v).apply() }
@@ -60,6 +65,7 @@ class SettingsRepository(context: Context) {
         _annivText.value = "纪念日"
         _annivType.value = "正数"
         _annivDate.value = 0L
+        _toolPlainText.value = true
         _weatherCity.value = ""
         _bootStart.value = true
         _noticeAgreed.value = true   // 清数据不用再看一遍声明

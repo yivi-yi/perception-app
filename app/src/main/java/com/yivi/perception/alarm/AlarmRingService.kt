@@ -197,7 +197,7 @@ class AlarmRingService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("⏰ $title")
+            .setContentTitle(title)
             .setContentText("点「暂停」$SNOOZE_MINUTES 分钟后再响，点「关闭」就停")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)

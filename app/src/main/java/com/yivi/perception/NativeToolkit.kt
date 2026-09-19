@@ -67,9 +67,20 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
     }
 
     suspend fun network(): Map<String, String> = withContext(Dispatchers.IO) {
-        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        val info = wm.connectionInfo
-        mapOf("ssid" to (info?.ssid ?: ""), "rssi" to (info?.rssi?.toString() ?: ""), "ip" to android.text.format.Formatter.formatIpAddress(info?.ipAddress ?: 0))
+        try {
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            val info = runCatching { wm.connectionInfo }.getOrNull()
+            val ssid = info?.ssid?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+                ?: "(读不到 WiFi 名：安卓 10 以上要定位权限)"
+            mapOf(
+                "ssid" to ssid,
+                "rssi" to (info?.rssi?.toString() ?: ""),
+                "ip" to android.text.format.Formatter.formatIpAddress(info?.ipAddress ?: 0)
+            )
+        } catch (e: Exception) {
+            mapOf("ssid" to "", "rssi" to "", "ip" to "", "error" to (e.message ?: "读不到网络信息"))
+        }
     }
 
     fun openApp(packageName: String): Map<String, String> {
@@ -85,12 +96,17 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
         }
     }
 
-    fun installedApps(): List<String> {
+    fun installedApps(): List<Map<String, String>> {
         val pm = context.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return pm.queryIntentActivities(intent, 0)
-            .mapNotNull { it.activityInfo?.packageName }
-            .distinct()
+            .distinctBy { it.activityInfo?.packageName }
+            .mapNotNull { info ->
+                val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
+                mapOf("name" to (info.loadLabel(pm)?.toString() ?: pkg), "package" to pkg)
+            }
+            .sortedBy { it["name"] }
+            .take(300)
     }
 
     suspend fun addSchedule(title: String, note: String, time: Long, remind: Boolean): Map<String, Any> {
@@ -135,7 +151,8 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
     }
 
     suspend fun deleteEvent(id: Long): Map<String, Any> {
-        repo.all().firstOrNull { it.id == id && it.category == "闹钟" }?.let { AlarmScheduler.cancel(context, it) }
+        // 闹钟和日程都可能有排班，删之前先取消掉，不然到点还会响
+        repo.all().firstOrNull { it.id == id }?.let { AlarmScheduler.cancel(context, it) }
         repo.deleteById(id)
         return mapOf("ok" to true, "id" to id)
     }

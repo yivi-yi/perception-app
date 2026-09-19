@@ -103,7 +103,7 @@ fun SettingsScreen() {
     val annivType by settings.annivType.collectAsState()
     val annivDate by settings.annivDate.collectAsState()
 
-    var running by remember { mutableStateOf(false) }
+    var running by remember { mutableStateOf(PerceptionApp.instance.mcpServer.isRunning) }
     var showTools by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(false) }
@@ -120,11 +120,22 @@ fun SettingsScreen() {
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     } else true
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val multiPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) copyWallpaper(context, uri)?.let { settings.setBgUri(it) }
     }
 
     fun startServer() {
+        // 服务要用到的权限顺手一起要：通知（服务常驻）+ 定位（工具盒定位/WiFi 名）+ 活动识别（步数）
+        val ask = buildList {
+            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (Build.VERSION.SDK_INT >= 29) add(Manifest.permission.ACTIVITY_RECOGNITION)
+        }.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (ask.isNotEmpty()) multiPermLauncher.launch(ask.toTypedArray())
         if (!notifPermission && Build.VERSION.SDK_INT >= 33) permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         val intent = Intent(context, ServerService::class.java).apply { action = ServerService.ACTION_START }
         ContextCompat.startForegroundService(context, intent)
@@ -303,6 +314,12 @@ fun SettingsScreen() {
         Spacer(Modifier.height(8.dp))
         GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
             Column(Modifier.padding(16.dp)) {
+                Text(
+                    if (running) "服务运行中 · 局域网的设备都能连" else "服务没开，工具盒现在连不上",
+                    color = if (running) palette.accent else palette.textDim,
+                    fontSize = 11.sp
+                )
+                Spacer(Modifier.height(10.dp))
                 ActionPill(
                     text = if (running) "停止服务" else "启动服务",
                     onClick = { if (running) stopServer() else startServer() },

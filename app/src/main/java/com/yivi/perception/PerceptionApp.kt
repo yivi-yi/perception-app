@@ -2,11 +2,15 @@ package com.yivi.perception
 
 import android.app.Application
 import androidx.room.Room
+import com.yivi.perception.alarm.AlarmScheduler
 import com.yivi.perception.data.SettingsRepository
 import com.yivi.perception.data.db.PerceptionDatabase
 import com.yivi.perception.data.repo.PerceptionRepository
 import com.yivi.perception.mcp.HttpMcpServer
 import com.yivi.perception.mcp.McpEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class PerceptionApp : Application() {
 
@@ -31,6 +35,11 @@ class PerceptionApp : Application() {
         repository = PerceptionRepository(database.dao())
         toolkit = NativeToolkit(this, repository)
         mcpServer = HttpMcpServer(McpEngine(toolkit, settings))
+
+        // 每次启动把闹钟重新排一遍：换过手机时间、被杀过、升过级，都能自动接上
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching { AlarmScheduler.rescheduleAll(this@PerceptionApp) }
+        }
     }
 
     companion object {

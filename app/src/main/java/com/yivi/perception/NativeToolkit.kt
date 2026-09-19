@@ -12,6 +12,7 @@ import android.os.Environment
 import android.os.StatFs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.yivi.perception.alarm.AlarmScheduler
 import com.yivi.perception.data.repo.PerceptionRepository
 
 class NativeToolkit(private val context: Context, private val repo: PerceptionRepository) {
@@ -98,7 +99,12 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
     }
 
     suspend fun addAlarm(title: String, note: String, time: Long, repeatDays: String): Map<String, Any> {
-        val id = repo.add(com.yivi.perception.data.db.EventEntity(category = "闹钟", title = title, note = note, time = time, repeatDays = repeatDays))
+        val alarm = com.yivi.perception.data.db.EventEntity(
+            category = "闹钟", title = title, note = note, time = time, remind = true, repeatDays = repeatDays
+        )
+        val id = repo.add(alarm)
+        // AI 加进来的闹钟也要真的排上，不然只是一条数据
+        AlarmScheduler.schedule(context, alarm.copy(id = id))
         return mapOf("ok" to true, "id" to id, "category" to "闹钟")
     }
 
@@ -111,17 +117,23 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
     suspend fun updateEvent(id: Long, title: String?, note: String?, time: Long?, remind: Boolean?, repeatDays: String?): Map<String, Any> {
         val all = repo.all()
         val item = all.find { it.id == id } ?: return mapOf("ok" to false, "error" to "not found")
-        repo.update(item.copy(
+        val updated = item.copy(
             title = title ?: item.title,
             note = note ?: item.note,
             time = time ?: item.time,
             remind = remind ?: item.remind,
             repeatDays = repeatDays ?: item.repeatDays
-        ))
+        )
+        repo.update(updated)
+        if (updated.category == "闹钟") {
+            AlarmScheduler.cancel(context, item)
+            if (updated.remind) AlarmScheduler.schedule(context, updated)
+        }
         return mapOf("ok" to true, "id" to id)
     }
 
     suspend fun deleteEvent(id: Long): Map<String, Any> {
+        repo.all().firstOrNull { it.id == id && it.category == "闹钟" }?.let { AlarmScheduler.cancel(context, it) }
         repo.deleteById(id)
         return mapOf("ok" to true, "id" to id)
     }

@@ -17,4 +17,6 @@ class PerceptionRepository(private val dao: PerceptionDao) {
     suspend fun update(event: EventEntity) = dao.update(event)
 
     suspend fun deleteById(id: Long) = dao.deleteById(id)
+
+    suspend fun clearAll() = dao.clearAll()
 }

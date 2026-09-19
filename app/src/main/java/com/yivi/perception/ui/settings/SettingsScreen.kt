@@ -1,6 +1,18 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.yivi.perception.ui.settings
 
+import androidx.compose.material3.ExperimentalMaterial3Api
+
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.ComponentName
+import android.os.PowerManager
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.Intent
@@ -15,7 +27,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -95,6 +106,11 @@ fun SettingsScreen() {
     var showLogs by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(false) }
     var pickAnnivDate by remember { mutableStateOf(false) }
+    var clearStep by remember { mutableStateOf(0) }
+    val bootStart by settings.bootStart.collectAsState()
+    val scope = rememberCoroutineScope()
+    var batteryOk by remember { mutableStateOf(isIgnoringBattery(context)) }
+    val versionName = remember { appVersion(context) }
 
     val notifPermission = if (Build.VERSION.SDK_INT >= 33) {
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -125,6 +141,7 @@ fun SettingsScreen() {
             if (e == Lifecycle.Event.ON_RESUME) {
                 accEnabled.value = isAccessibilityEnabled(context)
                 notifEnabled.value = isNotifEnabled(context)
+                batteryOk = isIgnoringBattery(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
@@ -304,7 +321,106 @@ fun SettingsScreen() {
             }
         }
 
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("𝒦ℯℯ𝓅 𝒜𝓁𝒾𝓋ℯ")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("开机自启动", color = palette.text, fontSize = 14.sp)
+                        Text("重启后自动把服务和闹钟接回来", color = palette.textDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                    }
+                    Switch(
+                        checked = bootStart,
+                        onCheckedChange = { settings.setBootStart(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
+                    )
+                }
+                ThinDivider()
+                JumpRow(
+                    title = "忽略电池优化",
+                    value = if (batteryOk) "已放行" else "去放行",
+                    valueColor = if (batteryOk) palette.accent else palette.textDim,
+                    onClick = { requestIgnoreBattery(context) }
+                )
+                ThinDivider()
+                JumpRow(
+                    title = "自启动 / 后台管理",
+                    value = "各家手机不一样，去给个权限",
+                    valueColor = palette.textDim,
+                    onClick = { openAutoStartSettings(context) }
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "· 想让闹钟准点响、服务常驻，上面两个都放行最稳",
+                    color = palette.textDim,
+                    fontSize = 11.sp
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        SectionLabel("𝒟𝒶𝓉𝒶")
+        Spacer(Modifier.height(8.dp))
+        GlassCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), showHighlight = false) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("版本", color = palette.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text(versionName, color = palette.textDim, fontSize = 12.sp)
+                }
+                ThinDivider()
+                Row(
+                    Modifier.fillMaxWidth().clickable { clearStep = 1 }.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("清空全部数据", color = Color(0xFFFF8095), fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text("日程 · 闹钟 · 设置", color = palette.textDim, fontSize = 12.sp)
+                }
+            }
+        }
+
         Spacer(Modifier.height(120.dp))
+    }
+
+    if (clearStep == 1) {
+        ConfirmDialog(
+            title = "清空全部数据",
+            text = "日程、闹钟和所有设置都会被清掉，确定要开始吗？",
+            confirmText = "继续",
+            onConfirm = { clearStep = 2 },
+            onDismiss = { clearStep = 0 }
+        )
+    }
+
+    if (clearStep == 2) {
+        ConfirmDialog(
+            title = "真的要清空？",
+            text = "删了就找不回来了，最后一次确认。",
+            confirmText = "清空",
+            onConfirm = {
+                clearStep = 0
+                scope.launch {
+                    try {
+                        val stop = Intent(context, ServerService::class.java).apply { action = ServerService.ACTION_STOP }
+                        context.startService(stop)
+                    } catch (_: Exception) {
+                    }
+                    running = false
+                    PerceptionApp.instance.repository.clearAll()
+                    File(context.filesDir, "wallpaper").listFiles()?.forEach { it.delete() }
+                    settings.clearAll()
+                }
+            },
+            onDismiss = { clearStep = 0 }
+        )
     }
 
     if (editName) {
@@ -393,6 +509,20 @@ private fun ThemeSwatch(label: String, active: Boolean, colors: List<Color>, onC
 }
 
 @Composable
+private fun JumpRow(title: String, value: String, valueColor: Color, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = palette.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(value, color = valueColor, fontSize = 12.sp)
+        Spacer(Modifier.width(2.dp))
+        Text("›", color = palette.textDim, fontSize = 15.sp)
+    }
+}
+
+@Composable
 private fun AddressRow(label: String, value: String) {
     val palette = LocalPalette.current
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -455,6 +585,73 @@ private fun loadBg(path: String) = try {
     }
 } catch (e: Exception) {
     null
+}
+
+private fun isIgnoringBattery(context: Context): Boolean {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+    return pm.isIgnoringBatteryOptimizations(context.packageName)
+}
+
+@SuppressLint("BatteryLife")
+private fun requestIgnoreBattery(context: Context) {
+    try {
+        context.startActivity(
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (e: Exception) {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+        }
+    }
+}
+
+/** 各家手机的"自启动管理"页面，能跳就跳，跳不过去就开应用详情页让用户自己找 */
+private fun openAutoStartSettings(context: Context) {
+    val candidates = listOf(
+        ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+        ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+        ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"),
+        ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"),
+        ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+        ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+        ComponentName("com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"),
+        ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
+        ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"),
+        ComponentName("com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"),
+        ComponentName("com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"),
+        ComponentName("com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity"),
+        ComponentName("com.transsion.phonemaster", "com.transsion.phonemaster.activity.PowerSavingActivityList")
+    )
+    for (cn in candidates) {
+        try {
+            context.startActivity(
+                Intent().setComponent(cn).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
+        } catch (_: Exception) {
+        }
+    }
+    try {
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (_: Exception) {
+    }
+}
+
+private fun appVersion(context: Context): String = try {
+    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+    "v${info.versionName}"
+} catch (e: Exception) {
+    "v1.0"
 }
 
 private fun isAccessibilityEnabled(context: Context): Boolean {

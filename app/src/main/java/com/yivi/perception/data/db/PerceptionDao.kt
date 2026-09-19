@@ -29,4 +29,7 @@ interface PerceptionDao {
 
     @Query("DELETE FROM events WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM events")
+    suspend fun clearAll()
 }

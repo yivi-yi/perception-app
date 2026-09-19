@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.yivi.perception.ui.common
 
 import androidx.compose.foundation.background
@@ -221,14 +223,16 @@ fun AlarmDialog(onDismiss: () -> Unit, onSave: (EventEntity) -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = {
-                val now = LocalDate.now().atTime(LocalTime.of(hour, minute))
+                var millis = LocalDate.now().atTime(LocalTime.of(hour, minute))
                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                // 只响一次的闹钟，如果时间已经过了就顺延到明天，不然装上就不会响
+                if (!repeat && millis <= System.currentTimeMillis()) millis += 24L * 60 * 60 * 1000
                 onSave(
                     EventEntity(
                         category = "闹钟",
                         title = title.ifBlank { "闹钟" },
                         note = note,
-                        time = now,
+                        time = millis,
                         remind = true,
                         repeatDays = if (repeat) days.sorted().joinToString(",") else ""
                     )

@@ -43,14 +43,14 @@ class HttpMcpServer(private val engine: McpEngine) {
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private val requestLog = ArrayDeque<String>()
 
-    /** 最近 20 条请求，新的在后 */
+    /** 最近 60 条请求相关日志，新的在后 */
     fun recentRequests(): List<String> = synchronized(requestLog) { requestLog.toList() }
 
     private fun log(line: String) {
         val stamped = "${timeFmt.format(Date())} $line"
         synchronized(requestLog) {
             requestLog.addLast(stamped)
-            while (requestLog.size > 20) requestLog.removeFirst()
+            while (requestLog.size > 60) requestLog.removeFirst()
         }
         Log.i("PerceptionMcp", stamped)
         runCatching { com.yivi.perception.PerceptionApp.instance.settings.addLog(stamped) }
@@ -105,7 +105,8 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val path = session.uri.trimEnd('/').ifBlank { "/" }
                 val isPost = session.method == Method.POST
                 val accept = session.headers["accept"]?.lowercase() ?: ""
-                val wantsSse = accept.contains("text/event-stream")
+                // 只要它接受 JSON 就回 JSON；只有"只要 SSE"的那种才包成事件流
+                val wantsSse = accept.contains("text/event-stream") && !accept.contains("application/json")
                 val response = when {
                     session.method == Method.OPTIONS ->
                         cors(newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", ""))
@@ -158,12 +159,13 @@ class HttpMcpServer(private val engine: McpEngine) {
                             engine.isNotification(request) -> {
                                 runBlocking { runCatching { engine.handle(request) } }
                                 log("POST $path → 202 ${engine.methodName(request)}（通知，按规范不回内容）")
-                                cors(newFixedLengthResponse(Response.Status.ACCEPTED, "application/json", ""))
+                                cors(newFixedLengthResponse(Response.Status.ACCEPTED, "text/plain", ""))
                             }
 
                             else -> {
                                 val method = engine.methodName(request)
                                 log("收到 $method（Accept: ${accept.ifBlank { "无" }} / UA: ${(session.headers["user-agent"] ?: "").take(40)}）")
+                                log("请求体：${raw.take(200).replace("\n", " ")}")
                                 val resp = runBlocking {
                                     runCatching { engine.handle(request) }.getOrElse { e ->
                                         buildJsonObject {
@@ -178,7 +180,8 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 }
                                 val text = json.encodeToString(JsonElement.serializer(), resp)
                                 val bad = resp["error"] != null
-                                log("POST $path → 200 $method${if (bad) "（报错：${resp["error"]}）" else ""}")
+                                log("POST $path → 200 $method（回的是 ${if (wantsSse) "SSE" else "JSON"}）${if (bad) "（报错：${resp["error"]}）" else ""}")
+                                log("响应体：${text.take(200)}")
                                 if (wantsSse) {
                                     cors(
                                         newFixedLengthResponse(

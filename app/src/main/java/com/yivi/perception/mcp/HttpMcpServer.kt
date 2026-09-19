@@ -223,12 +223,13 @@ class HttpMcpServer(private val engine: McpEngine) {
                             request == null ->
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
 
-                            !accept.contains("application/json; charset=utf-8") || !accept.contains("text/event-stream; charset=utf-8") -> {
+                            // 注意：客户端 Accept 里写的就是不带 charset 的媒体类型，别拿响应那套来比
+                            !accept.contains("application/json") || !accept.contains("text/event-stream") -> {
                                 log("POST $path → 406 Accept 不对（$accept）")
                                 rpcError(Response.Status.NOT_ACCEPTABLE, -32600, "Not Acceptable: Client must accept both application/json and text/event-stream")
                             }
 
-                            contentType.isNotBlank() && !contentType.contains("application/json; charset=utf-8") -> {
+                            contentType.isNotBlank() && !contentType.contains("application/json") -> {
                                 log("POST $path → 415 Content-Type 不对（$contentType）")
                                 rpcError(Response.Status.UNSUPPORTED_MEDIA_TYPE, -32600, "Unsupported Media Type: Content-Type must be application/json")
                             }
@@ -274,7 +275,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 val text = json.encodeToString(JsonElement.serializer(), resp)
                                 val bad = resp["error"] != null
                                 // 官方默认用 SSE 回请求结果；客户端不接受 SSE 才回 JSON
-                                val asSse = accept.contains("text/event-stream; charset=utf-8")
+                                val asSse = accept.contains("text/event-stream")
                                 log("POST $path → 200 $name（回 ${if (asSse) "SSE" else "JSON"}）${if (bad) "（报错：${resp["error"]}）" else ""}")
                                 log("响应体：${text.take(200)}")
                                 if (asSse) {

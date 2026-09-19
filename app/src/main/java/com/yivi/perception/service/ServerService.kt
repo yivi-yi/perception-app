@@ -94,7 +94,7 @@ class ServerService : Service() {
         )
         val notification: Notification = NotificationCompat.Builder(this, "perception_server")
             .setContentTitle("Perception · MCP 服务运行中")
-            .setContentText("局域网地址 http://${NetworkUtils.localIp()}:$PORT/mcp（点通知可回到 APP）")
+            .setContentText("点这里回到 APP，连接地址在设置页里")
             .setSmallIcon(R.drawable.ic_notify)
             .setOngoing(true)
             .setContentIntent(

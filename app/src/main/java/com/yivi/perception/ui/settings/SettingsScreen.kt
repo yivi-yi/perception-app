@@ -653,7 +653,8 @@ private fun AddressRow(label: String, value: String, onCopy: (() -> Unit)? = nul
 
 /** 本机连自己一次：能分清是"服务没起来"还是"外面连不进来" */
 private fun selfTest(port: Int): String = try {
-    fun call(body: String): Pair<Int, String> {
+    /** 返回 状态码 / body / Mcp-Session-Id */
+    fun call(body: String, sessionId: String?): Triple<Int, String, String?> {
         val conn = java.net.URL("http://127.0.0.1:$port/mcp").openConnection() as java.net.HttpURLConnection
         conn.requestMethod = "POST"
         conn.connectTimeout = 4000
@@ -661,32 +662,36 @@ private fun selfTest(port: Int): String = try {
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("Accept", "application/json, text/event-stream")
+        sessionId?.let { conn.setRequestProperty("Mcp-Session-Id", it) }
         conn.outputStream.use { it.write(body.toByteArray()) }
         val code = conn.responseCode
         val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
             ?.bufferedReader()?.use { it.readText() } ?: ""
-        return code to text
+        val sid = conn.getHeaderField("Mcp-Session-Id")
+        return Triple(code, text, sid)
     }
 
     val init = call(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{" +
-            "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"selftest\",\"version\":\"1\"}}}"
+            "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"selftest\",\"version\":\"1\"}}}",
+        null
     )
     if (init.first !in 200..299) {
-        "没通：initialize 返回 HTTP ${init.first} · ${init.second.take(80)}"
-    } else {
-        // id 必须原样回，客户端靠它对号
-        val idEchoed = Regex("\"id\":\\s*1\\b").containsMatchIn(init.second)
-        val listed = call("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}")
-        val text = listed.second
-        val count = Regex("\"inputSchema\":").findAll(text).count()
-        if (!idEchoed) {
-            "initialize 通了，但响应里的 id 不对（我没把 id 原样回）· ${init.second.take(80)}"
-        } else if (listed.first in 200..299 && text.contains("\"tools\"")) {
-            "通了：initialize 200（id 对得上），tools/list 拿到 $count 个工具"
-        } else {
-            "initialize 通了，但 tools/list 不对劲：HTTP ${listed.first} · ${text.take(80)}"
-        }
+        return "没通：initialize 返回 HTTP ${init.first} · ${init.second.take(80)}"
+    }
+    val sid = init.third
+    // 通知：按规范应该 202 且不带 body
+    call("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", sid)
+    val idEchoed = Regex("\"id\":\\s*1\\b").containsMatchIn(init.second)
+    val listed = call("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}", sid)
+    val text = listed.second
+    val count = Regex("\"inputSchema\":").findAll(text).count()
+    return when {
+        sid.isNullOrBlank() -> "initialize 通了，但没给 Mcp-Session-Id（客户端会没法继续）"
+        !idEchoed -> "initialize 通了，但响应里的 id 不对（我没把 id 原样回）· ${init.second.take(80)}"
+        listed.first in 200..299 && text.contains("\"tools\"") ->
+            "通了：initialize 200 · 会话 ${sid.take(8)}… · tools/list 拿到 $count 个工具"
+        else -> "initialize 通了，但 tools/list 不对劲：HTTP ${listed.first} · ${text.take(80)}"
     }
 } catch (e: Exception) {
     "没通：${e.message ?: e.javaClass.simpleName}（服务没起？或者端口被占）"

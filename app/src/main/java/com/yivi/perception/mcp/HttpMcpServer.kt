@@ -18,17 +18,18 @@ import java.util.Locale
 import java.util.UUID
 
 /**
- * MCP 的 Streamable HTTP 服务端（按 2025-06-18/2025-11-25 规范实现）。
+ * MCP 的 Streamable HTTP 服务端。行为照着官方 SDK（TS 的 StreamableHTTPServerTransport /
+ * Python 的 StreamableHTTPSessionManager）来写：
  *
- * 端点就一个 /mcp，按规范：
- * - POST  收 JSON-RPC。是请求就回一条结果（默认 JSON，客户端只要 SSE 时用 text/event-stream）
- *         是通知（无 id）或客户端回的 response（无 method）→ 202 且不带 body
- * - GET   开一条 SSE 流（我们没东西要主动推，就发心跳挂着）
- * - DELETE 结束会话 → 204
- * - 响应统一带 Mcp-Session-Id；initialize 里按客户端报的协议版本回（认不出才回自己的最新）
- * - 所有响应带 CORS 头，OPTIONS 预检也回；Origin 记进日志
- *
- * 另外记最近 60 条日志（请求头、请求体、响应体），/status 和 APP 的运行日志都能看到。
+ * - POST：Accept 必须同时包含 application/json 和 text/event-stream（否则 406）；
+ *   Content-Type 必须是 application/json（否则 415）；除 initialize 外必须带 Mcp-Session-Id
+ *   （没带 400，对不上 404）；请求默认用 SSE 回（客户端不接受 SSE 才回 JSON）；
+ *   通知（无 id）和客户端发来的 response（无 method）→ 202 且不带 body
+ * - GET：开一条 SSE 流（retry + 心跳），要有效的 session
+ * - DELETE：结束会话 → 204
+ * - OPTIONS：CORS 预检
+ * - 会话超过 30 分钟没动静就作废（之后 404，客户端会重新 initialize）
+ * - 记最近 60 条日志：请求头、请求体、响应体，/status 和 APP 运行日志里都能看
  */
 class HttpMcpServer(private val engine: McpEngine) {
 
@@ -37,12 +38,17 @@ class HttpMcpServer(private val engine: McpEngine) {
 
     val isRunning: Boolean get() = httpd != null
 
-    /** 起不来时的原因（端口被占之类），给界面显示 */
     @Volatile
     var lastError: String? = null
         private set
 
-    private val sessionId = UUID.randomUUID().toString()
+    private val supportedVersions = setOf("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+    private val sessionIdleMs = 30 * 60 * 1000L
+
+    /** 服务器自己的会话：id → 最后一次活动时间 */
+    private val sessions = mutableMapOf<String, Long>()
+    private var currentSession: String? = null
+
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private val requestLog = ArrayDeque<String>()
 
@@ -58,14 +64,38 @@ class HttpMcpServer(private val engine: McpEngine) {
         runCatching { com.yivi.perception.PerceptionApp.instance.settings.addLog(stamped) }
     }
 
+    private fun newSession(): String {
+        val id = UUID.randomUUID().toString().replace("-", "")
+        val now = System.currentTimeMillis()
+        synchronized(sessions) {
+            sessions[id] = now
+            currentSession = id
+            // 顺手清掉过期的
+            sessions.entries.removeAll { now - it.value > sessionIdleMs }
+        }
+        return id
+    }
+
+    private fun touchSession(id: String): Boolean = synchronized(sessions) {
+        val last = sessions[id] ?: return false
+        if (System.currentTimeMillis() - last > sessionIdleMs) {
+            sessions.remove(id)
+            return false
+        }
+        sessions[id] = System.currentTimeMillis()
+        true
+    }
+
+    private fun dropSession(id: String) = synchronized(sessions) {
+        sessions.remove(id)
+        if (currentSession == id) currentSession = null
+    }
+
     fun start(port: Int, onReady: (Int) -> Unit) {
         if (httpd != null) return
         val server = object : NanoHTTPD(port) {
 
-            /**
-             * GET 上的 SSE 流。newChunkedResponse 是 protected 静态方法，
-             * 用反射拿；拿不到就退回一条普通的 SSE 响应。
-             */
+            /** GET 上的 SSE 流：retry + 心跳，客户端断开就结束 */
             private fun sse(): Response {
                 return try {
                     val method = NanoHTTPD::class.java.getDeclaredMethod(
@@ -79,6 +109,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                     val input = java.io.PipedInputStream(out, 8192)
                     val thread = Thread {
                         try {
+                            out.write("retry: 1000\n\n".toByteArray())
                             out.write(": perception ready\n\n".toByteArray())
                             out.flush()
                             var beats = 0
@@ -99,35 +130,58 @@ class HttpMcpServer(private val engine: McpEngine) {
                     cors(method.invoke(null, Response.Status.OK, "text/event-stream", input) as Response)
                 } catch (e: Exception) {
                     log("SSE 流没挂上（${e.message}），回一条普通的")
-                    cors(newFixedLengthResponse(Response.Status.OK, "text/event-stream", ": perception ready\n\n"))
+                    cors(newFixedLengthResponse(Response.Status.OK, "text/event-stream", "retry: 1000\n\n"))
                 }
             }
 
+            /** 传输层的 JSON-RPC 错误（跟官方一样：id 给 null） */
+            private fun rpcError(status: Response.IStatus, code: Int, message: String): Response =
+                cors(
+                    newFixedLengthResponse(
+                        status, "application/json",
+                        json.encodeToString(JsonElement.serializer(), buildJsonObject {
+                            put("jsonrpc", JsonPrimitive("2.0"))
+                            put("id", JsonNull)
+                            put("error", buildJsonObject {
+                                put("code", JsonPrimitive(code))
+                                put("message", JsonPrimitive(message))
+                            })
+                        })
+                    )
+                )
+
             override fun serve(session: IHTTPSession): Response {
-                val isPost = session.method == Method.POST
+                val method = session.method
                 val path = session.uri.trimEnd('/').ifBlank { "/" }
                 val accept = session.headers["accept"]?.lowercase() ?: ""
-                // 规范要求客户端 Accept 里两个都要给。它只要 SSE 我们就回 SSE，其余回 JSON（两种都合规）
-                val wantsSse = accept.contains("text/event-stream") && !accept.contains("application/json")
+                val contentType = session.headers["content-type"]?.lowercase() ?: ""
                 val origin = session.headers["origin"] ?: "无"
                 val ua = (session.headers["user-agent"] ?: "").take(40)
-                val version = session.headers["mcp-protocol-version"] ?: "无"
+                val protocolHeader = session.headers["mcp-protocol-version"]
+                val sessionHeader = session.headers["mcp-session-id"]
 
-                val isMcpEndpoint = path == "/mcp" || path == "/" || (isPost && path != "/health" && path != "/status")
+                val isMcpPath = path == "/mcp" || path == "/" || (method == Method.POST && path != "/health" && path != "/status")
+                val isPost = method == Method.POST
+                // POST 先读 body（后面判 initialize、判会话头都要用）
+                val raw = if (isPost) readBody(session) else ""
+                val request = if (isPost) {
+                    runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
+                } else null
+                val isInitialize = request?.get("method")?.jsonPrimitive?.contentOrNull == "initialize"
 
-                val response = when {
-                    session.method == Method.OPTIONS ->
+                val response: Response = when {
+                    method == Method.OPTIONS ->
                         cors(newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", ""))
 
-                    !isMcpEndpoint && path == "/health" ->
+                    path == "/health" && !isMcpPath ->
                         cors(newFixedLengthResponse(Response.Status.OK, "text/plain", "ok"))
 
-                    !isMcpEndpoint && path == "/status" -> {
+                    path == "/status" && !isMcpPath -> {
                         val body = buildJsonObject {
                             put("name", JsonPrimitive("Perception"))
                             put("running", JsonPrimitive(true))
                             put("port", JsonPrimitive(port))
-                            put("session", JsonPrimitive(sessionId))
+                            put("session", JsonPrimitive(currentSession ?: ""))
                             put("tools", JsonPrimitive(engine.toolCount()))
                             put("requests", JsonArray(recentRequests().map { JsonPrimitive(it) }))
                         }
@@ -139,53 +193,69 @@ class HttpMcpServer(private val engine: McpEngine) {
                         )
                     }
 
-                    isMcpEndpoint && session.method == Method.GET -> {
-                        log("GET $path → 200 SSE 流（Accept: ${accept.ifBlank { "无" }}）")
-                        sse()
+                    isMcpPath && method == Method.GET -> {
+                        if (sessionHeader == null || !touchSession(sessionHeader)) {
+                            log("GET $path → 400/404 会话不对（session=${sessionHeader?.take(8) ?: "无"}）")
+                            rpcError(Response.Status.BAD_REQUEST, -32600, "Mcp-Session-Id is required")
+                        } else {
+                            log("GET $path → 200 SSE 流（Accept: ${accept.ifBlank { "无" }}）")
+                            sse()
+                        }
                     }
 
-                    isMcpEndpoint && session.method == Method.DELETE -> {
-                        log("DELETE $path → 204（客户端结束了会话）")
+                    isMcpPath && method == Method.DELETE -> {
+                        if (sessionHeader != null) {
+                            dropSession(sessionHeader)
+                            log("DELETE $path → 204（会话已结束）")
+                        } else {
+                            log("DELETE $path → 204（本来就没会话）")
+                        }
                         cors(newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", ""))
                     }
 
-                    isMcpEndpoint && isPost -> {
-                        val raw = readBody(session)
-                        val request = try {
-                            json.parseToJsonElement(raw).jsonObject
-                        } catch (e: Exception) {
-                            null
-                        }
+                    isMcpPath && isPost -> {
+                        val knownSession = sessionHeader != null && touchSession(sessionHeader)
+
                         when {
-                            request == null -> {
-                                log("POST $path → 400 解析不了：${raw.take(80)}")
-                                cors(
-                                    newFixedLengthResponse(
-                                        Response.Status.BAD_REQUEST, "application/json",
-                                        json.encodeToString(JsonElement.serializer(), buildJsonObject {
-                                            put("jsonrpc", JsonPrimitive("2.0"))
-                                            put("id", JsonNull)
-                                            put("error", buildJsonObject {
-                                                put("code", JsonPrimitive(-32700))
-                                                put("message", JsonPrimitive("parse error"))
-                                            })
-                                        })
-                                    )
-                                )
+                            // 跟官方一样：Accept 必须两个都要，Content-Type 必须是 json
+                            request == null ->
+                                rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
+
+                            !accept.contains("application/json") || !accept.contains("text/event-stream") -> {
+                                log("POST $path → 406 Accept 不对（$accept）")
+                                rpcError(Response.Status.NOT_ACCEPTABLE, -32600, "Not Acceptable: Client must accept both application/json and text/event-stream")
+                            }
+
+                            contentType.isNotBlank() && !contentType.contains("application/json") -> {
+                                log("POST $path → 415 Content-Type 不对（$contentType）")
+                                rpcError(Response.Status.UNSUPPORTED_MEDIA_TYPE, -32600, "Unsupported Media Type: Content-Type must be application/json")
+                            }
+
+                            protocolHeader != null && protocolHeader !in supportedVersions -> {
+                                log("POST $path → 400 协议版本不认（$protocolHeader）")
+                                rpcError(Response.Status.BAD_REQUEST, -32600, "Unsupported protocol version: $protocolHeader")
+                            }
+
+                            !isInitialize && sessionHeader == null -> {
+                                log("POST $path → 400 少了 Mcp-Session-Id")
+                                rpcError(Response.Status.BAD_REQUEST, -32600, "Bad Request: Mcp-Session-Id header is required")
+                            }
+
+                            !isInitialize && !knownSession -> {
+                                log("POST $path → 404 会话对不上（${sessionHeader?.take(8)}），客户端会重新 initialize")
+                                rpcError(Response.Status.NOT_FOUND, -32600, "Session not found")
                             }
 
                             engine.needsNoBody(request) -> {
-                                val what = if (request["method"] != null) {
-                                    request["method"]?.jsonPrimitive?.contentOrNull ?: "?"
-                                } else "response"
+                                val what = request["method"]?.jsonPrimitive?.contentOrNull ?: "response"
                                 runBlocking { runCatching { engine.handle(request) } }
                                 log("POST $path → 202 $what（通知/response，规范要求不带 body）")
                                 cors(newFixedLengthResponse(Response.Status.ACCEPTED, "text/plain", ""))
                             }
 
                             else -> {
-                                val method = engine.methodName(request)
-                                log("收到 $method（Accept: $accept / UA: $ua / Origin: $origin / 版本头: $version）")
+                                val name = engine.methodName(request)
+                                log("收到 $name（Accept: $accept / UA: $ua / Origin: $origin / 版本头: ${protocolHeader ?: "无"} / session: ${sessionHeader?.take(8) ?: "无"}）")
                                 log("请求体：${raw.replace("\n", " ").take(200)}")
                                 val resp = runBlocking {
                                     runCatching { engine.handle(request) }.getOrElse { e ->
@@ -201,9 +271,11 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 }
                                 val text = json.encodeToString(JsonElement.serializer(), resp)
                                 val bad = resp["error"] != null
-                                log("POST $path → 200 $method（回 ${if (wantsSse) "SSE" else "JSON"}）${if (bad) "（报错：${resp["error"]}）" else ""}")
+                                // 官方默认用 SSE 回请求结果；客户端不接受 SSE 才回 JSON
+                                val asSse = accept.contains("text/event-stream")
+                                log("POST $path → 200 $name（回 ${if (asSse) "SSE" else "JSON"}）${if (bad) "（报错：${resp["error"]}）" else ""}")
                                 log("响应体：${text.take(200)}")
-                                if (wantsSse) {
+                                if (asSse) {
                                     cors(
                                         newFixedLengthResponse(
                                             Response.Status.OK, "text/event-stream",
@@ -217,17 +289,19 @@ class HttpMcpServer(private val engine: McpEngine) {
                         }
                     }
 
-                    path == "/mcp" || path == "/" -> {
-                        log("${session.method} $path → 405（这个端点只收 POST/GET/DELETE）")
-                        cors(newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", "use POST"))
-                    }
-
                     else -> {
                         log("${session.method} $path → 404")
                         cors(newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "not found"))
                     }
                 }
-                response.addHeader("Mcp-Session-Id", sessionId)
+
+                // 会话头：initialize（且没带会话头）才开新会话，跟官方一致
+                val respondSession = when {
+                    sessionHeader != null -> sessionHeader
+                    isMcpPath && isPost && isInitialize && request != null -> newSession()
+                    else -> currentSession ?: ""
+                }
+                if (respondSession.isNotBlank()) response.addHeader("Mcp-Session-Id", respondSession)
                 return response
             }
         }
@@ -235,7 +309,7 @@ class HttpMcpServer(private val engine: McpEngine) {
             server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             httpd = server
             lastError = null
-            log("服务起来了，监听 0.0.0.0:$port · session=$sessionId")
+            log("服务起来了，监听 0.0.0.0:$port")
             onReady(port)
         } catch (e: Exception) {
             lastError = e.message ?: e.javaClass.simpleName
@@ -249,6 +323,10 @@ class HttpMcpServer(private val engine: McpEngine) {
         } catch (_: Exception) {
         }
         httpd = null
+        synchronized(sessions) {
+            sessions.clear()
+            currentSession = null
+        }
         log("服务停了")
     }
 

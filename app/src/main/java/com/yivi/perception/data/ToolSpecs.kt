@@ -96,14 +96,17 @@ object Tools {
             )
         ),
         ToolSpec("network", "当前连的 WiFi 名字、信号强度、本机 IP。安卓 10 以上读 WiFi 名需要定位权限。"),
-        ToolSpec("sensors", "这台手机上有哪些传感器（只是清单）。要读数用 read_sensor。"),
         ToolSpec(
             "read_sensor",
-            "读一次传感器的当前值：光线强弱、距离、有没有在动、手机朝向、走了多少步、气压、湿度、环境温度、磁场。",
+            "读一次手机传感器的当前值。只读每台手机基本都有的那几路：光线、距离、动静、朝向、步数。" +
+                "kind 可以给：light=光线（lux，还会给"很暗/偏暗/正常/很亮"）、proximity=距离（贴近/远离）、" +
+                "motion=动静（在一小段时间里看抖动，判断放着没动/轻轻动/在晃）、direction=朝向（方位角 + 东南西北）、" +
+                "steps=步数（开机以来的步数，要活动识别权限）；kind=list 看这台机器有哪几路；" +
+                "不传或 all = 上面几路全读一遍。读不到的会说明原因（没那路传感器，或者它只在变化时才上报）。",
             listOf(
                 ToolParam(
                     "kind", "string",
-                    "light=光线 / proximity=距离 / motion=动静 / direction=朝向 / steps=步数 / pressure=气压 / humidity=湿度 / temperature=环境温度 / magnetic=磁场强度；不传 = all 全都要"
+                    "light 光线 / proximity 距离 / motion 动静 / direction 朝向 / steps 步数 / list 看这台机器有哪些；不传 = 全部"
                 )
             )
         ),

@@ -108,21 +108,39 @@ class NativeToolkit(
 
     // ── 传感器 ──────────────────────────────────────
 
-    fun sensors(): List<Map<String, String>> {
-        val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return emptyList()
-        return sm.getSensorList(Sensor.TYPE_ALL).map {
-            mapOf(
-                "name" to (it.name ?: ""),
-                "type" to it.type.toString(),
-                "vendor" to (it.vendor ?: "")
-            )
-        }
+    /** 常见传感器在这台机器上有没有（只列这几个常用的，不再倒一长串杂项） */
+    private fun commonSensorList(sm: SensorManager): List<Map<String, Any>> = listOf(
+        Triple("light", "光线", Sensor.TYPE_LIGHT),
+        Triple("proximity", "距离", Sensor.TYPE_PROXIMITY),
+        Triple("motion", "动静（加速度）", Sensor.TYPE_ACCELEROMETER),
+        Triple("direction", "朝向", Sensor.TYPE_ROTATION_VECTOR),
+        Triple("steps", "步数", Sensor.TYPE_STEP_COUNTER)
+    ).map { (kind, label, type) ->
+        mapOf(
+            "kind" to kind,
+            "name" to label,
+            "有" to (sm.getDefaultSensor(type) != null)
+        )
     }
 
-    /** 真的去读一次传感器：light / proximity / steps / direction / motion / all */
+    /**
+     * 读一次传感器。只保留每台手机基本都有的那几路：
+     * light 光线 / proximity 距离 / motion 动静 / direction 朝向 / steps 步数；
+     * kind="list" 看这台机器有哪几路；不传（或 all）就是全都读。
+     */
     suspend fun readSensor(kind: String): Map<String, Any> = withContext(Dispatchers.IO) {
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
             ?: return@withContext mapOf("ok" to false, "error" to "这台设备没有传感器服务")
+
+        if (kind.equals("list", true)) {
+            val list = commonSensorList(sm)
+            return@withContext mapOf(
+                "ok" to true,
+                "sensors" to list,
+                "note" to "有=false 就是这台机器没有那一路"
+            )
+        }
+
         val out = mutableMapOf<String, Any>()
 
         if (kind == "all" || kind == "light") {
@@ -166,13 +184,19 @@ class NativeToolkit(
             }
         }
         if (kind == "all" || kind == "direction") {
-            val v = readSamples(sm, Sensor.TYPE_ROTATION_VECTOR).lastOrNull()
-            if (v != null) {
+            val rv = readSamples(sm, Sensor.TYPE_ROTATION_VECTOR).lastOrNull()
+            val azimuth = if (rv != null) {
                 val rm = FloatArray(9)
                 val ori = FloatArray(3)
-                SensorManager.getRotationMatrixFromVector(rm, v)
+                SensorManager.getRotationMatrixFromVector(rm, rv)
                 SensorManager.getOrientation(rm, ori)
-                val deg = ((Math.toDegrees(ori[0].toDouble()).toFloat() + 360f) % 360f).toInt()
+                Math.toDegrees(ori[0].toDouble()).toFloat()
+            } else {
+                // 少数机器没有旋转矢量，退回老接口 TYPE_ORIENTATION（已废弃但还能用）
+                readSamples(sm, Sensor.TYPE_ORIENTATION).lastOrNull()?.get(0)
+            }
+            if (azimuth != null) {
+                val deg = ((azimuth + 360f) % 360f).toInt()
                 out["azimuth"] = deg
                 out["direction"] = when {
                     deg < 23 || deg >= 338 -> "北"
@@ -184,24 +208,6 @@ class NativeToolkit(
                     deg < 293 -> "西"
                     else -> "西北"
                 }
-            }
-        }
-        if (kind == "all" || kind == "pressure") {
-            val v = readSamples(sm, Sensor.TYPE_PRESSURE).lastOrNull()
-            if (v != null) out["pressure_hpa"] = v[0]
-        }
-        if (kind == "all" || kind == "humidity") {
-            val v = readSamples(sm, Sensor.TYPE_RELATIVE_HUMIDITY).lastOrNull()
-            if (v != null) out["humidity_percent"] = v[0]
-        }
-        if (kind == "all" || kind == "temperature") {
-            val v = readSamples(sm, Sensor.TYPE_AMBIENT_TEMPERATURE).lastOrNull()
-            if (v != null) out["temperature_c"] = v[0]
-        }
-        if (kind == "all" || kind == "magnetic") {
-            val v = readSamples(sm, Sensor.TYPE_MAGNETIC_FIELD).lastOrNull()
-            if (v != null) {
-                out["magnetic_ut"] = kotlin.math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
             }
         }
         if (kind == "all" || kind == "steps") {
@@ -216,7 +222,8 @@ class NativeToolkit(
         if (out.isEmpty()) {
             mapOf(
                 "ok" to false,
-                "error" to "没读到你要的那几路（kind=$kind）：要么这台机器没这个传感器，要么它只在发生变化时才上报（比如步数要边走边读）"
+                "error" to "没读到 kind=$kind。能读的是 light 光线 / proximity 距离 / motion 动静 / direction 朝向 / steps 步数；" +
+                    "读不到一般是这台机器没那路传感器，或者它只在变化时才上报（步数要边走边读）。kind=list 可以看这台机器有哪几路"
             )
         } else {
             mapOf("ok" to true).plus(out)

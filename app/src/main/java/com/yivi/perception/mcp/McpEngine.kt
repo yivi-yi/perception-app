@@ -147,7 +147,6 @@ class McpEngine(
             "location" -> toolkit.location()
             "weather" -> toolkit.weather(s("city"), s("source"))
             "network" -> toolkit.network()
-            "sensors" -> toolkit.sensors()
             "read_sensor" -> toolkit.readSensor(s("kind") ?: "all")
             "sound_state" -> toolkit.soundState()
             "set_sound" -> toolkit.setSound(s("mode"), b("dnd"), l("level")?.toInt(), s("stream"))

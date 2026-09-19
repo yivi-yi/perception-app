@@ -18,6 +18,9 @@ object ToolCatalog {
         "network" to "WiFi 名 / 信号 / 本机 IP",
         "sensors" to "设备上有哪些传感器",
         "open_app" to "按包名打开应用",
-        "installed_apps" to "已安装可启动的应用（名称 + 包名）"
+        "installed_apps" to "已安装可启动的应用（名称 + 包名）",
+        "current_app" to "当前前台应用包名（要开无障碍）",
+        "screen_text" to "屏幕上最近一次的文字，粗略（要开无障碍）",
+        "read_notifications" to "最近收到的通知（要开通知监听）"
     )
 }

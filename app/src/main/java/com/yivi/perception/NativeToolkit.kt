@@ -109,6 +109,38 @@ class NativeToolkit(private val context: Context, private val repo: PerceptionRe
             .take(300)
     }
 
+    /** 当前前台应用（靠无障碍服务记下来的） */
+    fun currentApp(): Map<String, Any> {
+        val pkg = com.yivi.perception.service.PermissionService.lastPackage
+        return if (pkg.isNullOrBlank()) {
+            mapOf("ok" to false, "error" to "没开无障碍，或者还没捕捉到前台应用")
+        } else {
+            mapOf("ok" to true, "package" to pkg)
+        }
+    }
+
+    /** 屏幕上最近一次的文字（无障碍事件里抓的，比较粗） */
+    fun screenText(): Map<String, Any> {
+        val text = com.yivi.perception.service.PermissionService.lastScreenText
+        return if (text.isBlank()) {
+            mapOf("ok" to false, "error" to "没开无障碍，或者还没抓到屏幕文字")
+        } else {
+            mapOf("ok" to true, "text" to text)
+        }
+    }
+
+    /** 最近收到的通知（最多 20 条，要通知监听权限） */
+    fun notifications(): Map<String, Any> {
+        val list = synchronized(com.yivi.perception.service.NotificationListener.lastNotifications) {
+            com.yivi.perception.service.NotificationListener.lastNotifications.toList()
+        }
+        return if (list.isEmpty()) {
+            mapOf("ok" to false, "error" to "没开通知监听，或者最近没有新通知")
+        } else {
+            mapOf("ok" to true, "count" to list.size, "items" to list)
+        }
+    }
+
     suspend fun addSchedule(title: String, note: String, time: Long, remind: Boolean): Map<String, Any> {
         val event = com.yivi.perception.data.db.EventEntity(
             category = "行程", title = title, note = note, time = time, remind = remind

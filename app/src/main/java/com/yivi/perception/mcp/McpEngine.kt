@@ -73,7 +73,10 @@ class McpEngine(
         tool("network", "当前 WiFi 名 / 信号强度 / 本机 IP"),
         tool("sensors", "列出设备上的传感器"),
         tool("open_app", "按包名打开一个应用", str("packageName", "应用包名，如 com.tencent.mm")),
-        tool("installed_apps", "列出已安装、可启动的应用（名称 + 包名）")
+        tool("installed_apps", "列出已安装、可启动的应用（名称 + 包名）"),
+        tool("current_app", "当前前台应用包名（要开无障碍）"),
+        tool("screen_text", "屏幕上最近一次的文字，粗略（要开无障碍）"),
+        tool("read_notifications", "最近收到的通知，最多 20 条（要开通知监听）")
     )
 
     private fun tool(name: String, desc: String, vararg props: P): JsonObject {
@@ -177,6 +180,9 @@ class McpEngine(
             "sensors" -> toolkit.sensors()
             "open_app" -> toolkit.openApp(s("packageName") ?: "")
             "installed_apps" -> toolkit.installedApps()
+            "current_app" -> toolkit.currentApp()
+            "screen_text" -> toolkit.screenText()
+            "read_notifications" -> toolkit.notifications()
             else -> mapOf("error" to "unknown tool: $name")
         }
 

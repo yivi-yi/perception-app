@@ -128,19 +128,20 @@ class HttpMcpServer(private val engine: McpEngine) {
                     val input = java.io.PipedInputStream(out, 8192)
                     val thread = Thread {
                         try {
-                            out.write("retry: 1000\n\n".toByteArray())
-                            if (initial.isNotEmpty()) out.write(initial.toByteArray())
-                            out.write(": perception ready\n\n".toByteArray())
-                            // 有的客户端要这条流上出过事件才认"连上了"，给它一条无害的
-                            out.write("event: ping\ndata: {}\n\n".toByteArray())
-                            out.flush()
-                            // 登记要早：客户端拿到 endpoint 就会立刻 POST 回来
+                            // 先把出口登记上再发数据：客户端拿到 endpoint 会立刻 POST 回来，
+                            // 慢一步就可能撞上"没有对应的流"
                             if (sessionId != null) synchronized(sseStreams) { sseStreams[sessionId] = out }
+                            out.write("retry: 1000\r\n\r\n".toByteArray())
+                            if (initial.isNotEmpty()) out.write(initial.replace("\n", "\r\n").toByteArray())
+                            out.write(": perception ready\r\n\r\n".toByteArray())
+                            // 有的客户端要这条流上出过事件才认"连上了"，给它一条无害的
+                            out.write("event: ping\r\ndata: {}\r\n\r\n".toByteArray())
+                            out.flush()
                             var beats = 0
                             while (beats < 40) {
                                 Thread.sleep(15000)
                                 synchronized(out) {
-                                    out.write(": ping\n\n".toByteArray())
+                                    out.write(": ping\r\n\r\n".toByteArray())
                                     out.flush()
                                 }
                                 beats++
@@ -219,6 +220,8 @@ class HttpMcpServer(private val engine: McpEngine) {
 
                     isMessagesPath && isPost -> {
                         val sid = session.parameters?.get("sessionId")?.firstOrNull()
+                            ?: session.parameters?.get("session_id")?.firstOrNull()
+                            ?: sessionHeader
                         val out = synchronized(sseStreams) { if (sid != null) sseStreams[sid] else null }
                         when {
                             request == null ->
@@ -254,7 +257,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 // 老规矩：响应从那条 SSE 流回去，POST 本身只回 202
                                 val pushed = try {
                                     synchronized(out) {
-                                        out.write("event: message\ndata: $text\n\n".toByteArray())
+                                        out.write("event: message\r\ndata: $text\r\n\r\n".toByteArray())
                                         out.flush()
                                     }
                                     true

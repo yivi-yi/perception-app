@@ -358,6 +358,7 @@ class NativeToolkit(
         }
 
         val out = mutableMapOf<String, Any>()
+        val missing = mutableListOf<String>()
 
         if (kind == "all" || kind == "light") {
             // 光感很多机器第一帧是 0，取中位数：开灯却报"很暗"就是这个坑
@@ -372,6 +373,8 @@ class NativeToolkit(
                     lux < 1000 -> "正常"
                     else -> "很亮"
                 }
+            } else {
+                missing += "光线"
             }
         }
         if (kind == "all" || kind == "proximity") {
@@ -379,6 +382,8 @@ class NativeToolkit(
             if (v != null) {
                 val max = sm.getDefaultSensor(Sensor.TYPE_PROXIMITY)?.maximumRange ?: 1f
                 out["proximity"] = if (v[0] < max) "贴近（可能在口袋或耳边）" else "远离"
+            } else {
+                missing += "距离"
             }
         }
         if (kind == "all" || kind == "motion") {
@@ -397,6 +402,8 @@ class NativeToolkit(
                     jitter < 0.40f -> "轻轻动着"
                     else -> "在晃"
                 }
+            } else {
+                missing += "动静"
             }
         }
         if (kind == "all" || kind == "direction") {
@@ -424,6 +431,8 @@ class NativeToolkit(
                     deg < 293 -> "西"
                     else -> "西北"
                 }
+            } else {
+                missing += "朝向"
             }
         }
         if (kind == "all" || kind == "steps") {
@@ -431,7 +440,7 @@ class NativeToolkit(
                 out["steps"] = "没给活动识别权限，读不了步数"
             } else {
                 val v = readSamples(sm, Sensor.TYPE_STEP_COUNTER).lastOrNull()
-                if (v != null) out["steps_since_boot"] = v[0].toInt()
+                if (v != null) out["steps_since_boot"] = v[0].toInt() else missing += "步数（要走动才会变）"
             }
         }
 
@@ -439,10 +448,13 @@ class NativeToolkit(
             mapOf(
                 "ok" to false,
                 "error" to "没读到 kind=$kind。能读的是 light 光线 / proximity 距离 / motion 动静 / direction 朝向 / steps 步数；" +
-                    "读不到一般是这台机器没那路传感器，或者它只在变化时才上报（步数要边走边读）。kind=list 可以看这台机器有哪几路"
+                    "这次一个数据都没收到（${missing.joinToString("、")}）。常见原因是手机息屏时部分传感器不上报，" +
+                    "或者这台机器没那路传感器。kind=list 可以看这台机器有哪几路"
             )
         } else {
-            mapOf("ok" to true).plus(out)
+            val head = mutableMapOf<String, Any>("ok" to true)
+            if (missing.isNotEmpty()) head["没读到的"] = missing.joinToString("、")
+            head.plus(out)
         }
     }
 
@@ -450,8 +462,9 @@ class NativeToolkit(
      * 采集一小段时间的传感器数据（不是只取第一帧）。
      * 光感/步数这类传感器有时只在变化或走路时上报，采不到就返回空，由调用方说明。
      */
-    private fun readSamples(sm: SensorManager, type: Int, windowMs: Long = 700, maxSamples: Int = 24): List<FloatArray> {
-        val sensor = sm.getDefaultSensor(type) ?: return emptyList()
+    private fun readSamples(sm: SensorManager, type: Int, windowMs: Long = 1000, maxSamples: Int = 24): List<FloatArray> {
+        // 有 wake-up 版就用它：息屏时普通传感器不上报，读出来是空或者一堆 0
+        val sensor = sm.getDefaultSensor(type, true) ?: sm.getDefaultSensor(type) ?: return emptyList()
         val samples = mutableListOf<FloatArray>()
         val lock = Object()
         val listener = object : SensorEventListener {
@@ -465,12 +478,17 @@ class NativeToolkit(
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
         return try {
-            sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
+            // 回调显式丢主线程：这段跑在 IO 线程上，没有 Looper 时有些机器根本不给回调
+            sm.registerListener(
+                listener, sensor, SensorManager.SENSOR_DELAY_NORMAL,
+                android.os.Handler(android.os.Looper.getMainLooper())
+            )
             val end = System.currentTimeMillis() + windowMs
             synchronized(lock) {
-                while (samples.size < 3 && System.currentTimeMillis() < end) {
-                    lock.wait(60)
-                }
+                // 先等来第一个样本，再多给 250ms 攒几个（以前死等 3 个，没变化的那几路就干等超时）
+                while (samples.isEmpty() && System.currentTimeMillis() < end) lock.wait(50)
+                val more = System.currentTimeMillis() + 250
+                while (samples.size < 4 && System.currentTimeMillis() < more) lock.wait(50)
             }
             synchronized(lock) { samples.toList() }
         } catch (e: Exception) {

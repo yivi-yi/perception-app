@@ -3,7 +3,6 @@ package com.yivi.perception.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
@@ -67,23 +66,26 @@ fun AppBackground(content: @Composable () -> Unit) {
             }
 
             val scrim = if (palette.isDark) Color.Black else Color.White
-            Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(
-                        listOf(
-                            scrim.copy(alpha = if (palette.isDark) 0.16f else 0.22f),
-                            scrim.copy(alpha = if (palette.isDark) 0.38f else 0.40f)
+            // 自己设了壁纸才压一层蒙版让字看得清；默认底本身就是干净的，不用蒙
+            if (bgPath.isNotBlank()) {
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(
+                            listOf(
+                                scrim.copy(alpha = if (palette.isDark) 0.16f else 0.22f),
+                                scrim.copy(alpha = if (palette.isDark) 0.38f else 0.40f)
+                            )
                         )
                     )
                 )
-            )
+            }
 
             content()
         }
     }
 }
 
-/** 没壁纸时的默认底：主题色渐变 + 几团柔光，小图放大刚好是毛玻璃那种糊 */
+/** 没壁纸时的默认底：暗色就是黑，亮色是主题色的极淡版；小图放大刚好是毛玻璃那种糊 */
 private fun makeSoftBackdrop(palette: com.yivi.perception.ui.theme.Palette): ImageBitmap? = try {
     val w = 54
     val h = 108
@@ -91,12 +93,8 @@ private fun makeSoftBackdrop(palette: com.yivi.perception.ui.theme.Palette): Ima
     val canvas = Canvas(bmp)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    paint.shader = LinearGradient(
-        0f, 0f, 0f, h.toFloat(),
-        intArrayOf(palette.bgTop.toArgb(), palette.bgBottom.toArgb()),
-        null, Shader.TileMode.CLAMP
-    )
-    canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+    val accent = palette.accent.toArgb()
+    canvas.drawColor(if (palette.isDark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
 
     fun blob(cx: Float, cy: Float, r: Float, color: Int, alpha: Int) {
         paint.shader = RadialGradient(
@@ -107,9 +105,17 @@ private fun makeSoftBackdrop(palette: com.yivi.perception.ui.theme.Palette): Ima
         )
         canvas.drawCircle(cx, cy, r, paint)
     }
-    blob(w * 0.15f, h * 0.12f, w * 1.4f, palette.accent.toArgb(), 0x66)
-    blob(w * 0.95f, h * 0.42f, w * 1.2f, palette.textPrimary.toArgb(), 0x1F)
-    blob(w * 0.5f, h * 0.92f, w * 1.6f, palette.accent.toArgb(), 0x4D)
+
+    if (palette.isDark) {
+        // 暗色：底就是黑，主色只留一点点，别糊成一片紫
+        blob(w * 0.20f, h * 0.10f, w * 1.5f, accent, 0x14)
+        blob(w * 0.90f, h * 0.95f, w * 1.6f, accent, 0x10)
+    } else {
+        // 亮色：白底上一层非常淡的主色，淡到只是"有点粉/有点蓝"的程度
+        blob(w * 0.15f, h * 0.12f, w * 1.6f, accent, 0x16)
+        blob(w * 1.00f, h * 0.55f, w * 1.4f, accent, 0x10)
+        blob(w * 0.50f, h * 0.95f, w * 1.8f, accent, 0x18)
+    }
     bmp.asImageBitmap()
 } catch (e: Exception) {
     null

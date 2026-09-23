@@ -33,24 +33,30 @@ class McpEngine(
 
     /** 工具表从 data/Tools 生成，跟设置页里显示的说明书是同一份 */
     private fun toolList(): List<JsonObject> = Tools.all.map { spec ->
+        val schema = buildJsonObject {
+            put("type", JsonPrimitive("object"))
+            put("properties", buildJsonObject {
+                spec.params.forEach { p ->
+                    put(p.name, buildJsonObject {
+                        put("type", JsonPrimitive(p.type))
+                        put("description", JsonPrimitive(p.desc))
+                    })
+                }
+            })
+            val required = spec.params.filter { it.required }
+            if (required.isNotEmpty()) {
+                put("required", JsonArray(required.map { JsonPrimitive(it.name) }))
+            }
+        }
         buildJsonObject {
             put("name", JsonPrimitive(spec.name))
             put("description", JsonPrimitive(spec.desc))
-            put("inputSchema", buildJsonObject {
-                put("type", JsonPrimitive("object"))
-                put("properties", buildJsonObject {
-                    spec.params.forEach { p ->
-                        put(p.name, buildJsonObject {
-                            put("type", JsonPrimitive(p.type))
-                            put("description", JsonPrimitive(p.desc))
-                        })
-                    }
-                })
-                val required = spec.params.filter { it.required }
-                if (required.isNotEmpty()) {
-                    put("required", JsonArray(required.map { JsonPrimitive(it.name) }))
-                }
-            })
+            put("inputSchema", schema)
+            // 规范里的字段名是 inputSchema。有的客户端自己写成 input_schema 或
+            // OpenAI 那套 parameters，读不到就报"工具参数必须是 JSON object"，
+            // 多给两份别名，规范客户端会忽略多余的。
+            put("input_schema", schema)
+            put("parameters", schema)
         }
     }
 

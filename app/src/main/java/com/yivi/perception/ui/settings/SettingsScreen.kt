@@ -495,6 +495,21 @@ fun SettingsScreen() {
                     Text("版本", color = palette.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
                     Text(versionName, color = palette.textDim, fontSize = 12.sp)
                 }
+                ThinDivider()
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("作者", color = palette.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text("不容忆", color = palette.textDim, fontSize = 12.sp)
+                }
+                ThinDivider()
+                JumpRow(
+                    title = "QQ 群",
+                    value = "1076172382 · 点一下复制",
+                    valueColor = palette.accent,
+                    onClick = { copyText(context, "1076172382") }
+                )
             }
         }
 

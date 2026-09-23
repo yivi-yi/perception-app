@@ -54,6 +54,9 @@ class HttpMcpServer(private val engine: McpEngine) {
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private val requestLog = ArrayDeque<String>()
 
+    /** 老式 HTTP+SSE 传输：sessionId → 那条流的出口，POST 进来的响应往这里推 */
+    private val sseStreams = mutableMapOf<String, java.io.OutputStream>()
+
     fun recentRequests(): List<String> = synchronized(requestLog) { requestLog.toList() }
 
     private fun log(line: String) {
@@ -98,8 +101,12 @@ class HttpMcpServer(private val engine: McpEngine) {
         if (httpd != null) return
         val server = object : NanoHTTPD(port) {
 
-            /** GET 上的 SSE 流：retry + 心跳，客户端断开就结束 */
-            private fun sse(): Response {
+            /**
+             * GET 上的 SSE 流：retry + 心跳，客户端断开就结束。
+             * initial 是开流时先写出去的内容（老式传输要用它给客户端 endpoint）。
+             * 传了 sessionId 就把这条流的出口登记下来，POST 的响应会推到这儿。
+             */
+            private fun sse(initial: String = "", sessionId: String? = null): Response {
                 return try {
                     val method = NanoHTTPD::class.java.getDeclaredMethod(
                         "newChunkedResponse",
@@ -113,18 +120,24 @@ class HttpMcpServer(private val engine: McpEngine) {
                     val thread = Thread {
                         try {
                             out.write("retry: 1000\n\n".toByteArray())
+                            if (initial.isNotEmpty()) out.write(initial.toByteArray())
                             out.write(": perception ready\n\n".toByteArray())
                             out.flush()
+                            // 登记要早：客户端拿到 endpoint 就会立刻 POST 回来
+                            if (sessionId != null) synchronized(sseStreams) { sseStreams[sessionId] = out }
                             var beats = 0
                             while (beats < 40) {
                                 Thread.sleep(15000)
-                                out.write(": ping\n\n".toByteArray())
-                                out.flush()
+                                synchronized(out) {
+                                    out.write(": ping\n\n".toByteArray())
+                                    out.flush()
+                                }
                                 beats++
                             }
                         } catch (_: Exception) {
                             // 客户端走了
                         } finally {
+                            if (sessionId != null) synchronized(sseStreams) { sseStreams.remove(sessionId) }
                             runCatching { out.close() }
                         }
                     }
@@ -163,7 +176,11 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val protocolHeader = session.headers["mcp-protocol-version"]
                 val sessionHeader = session.headers["mcp-session-id"]
 
-                val isMcpPath = path == "/mcp" || path == "/" || (method == Method.POST && path != "/health" && path != "/status")
+                val isSsePath = path == "/sse"
+                val isMessagesPath = path == "/messages"
+                // /sse 和 /messages 是老式 HTTP+SSE 传输的那两个路径，不算在 Streamable HTTP 里
+                val isMcpPath = !isSsePath && !isMessagesPath &&
+                    (path == "/mcp" || path == "/" || (method == Method.POST && path != "/health" && path != "/status"))
                 val isPost = method == Method.POST
                 // POST 先读 body（后面判 initialize、判会话头都要用）
                 val raw = if (isPost) readBody(session) else ""
@@ -175,6 +192,69 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val response: Response = when {
                     method == Method.OPTIONS ->
                         cors(newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", ""))
+
+                    // ── 老式 HTTP+SSE 传输（2024-11-05 那套）：GET /sse 开流，POST /messages 发消息 ──
+                    isSsePath && method == Method.GET -> {
+                        val sid = newSession()
+                        log("GET $path → 200 SSE 流（老式传输，会话 ${sid.take(8)}）")
+                        sse("event: endpoint\ndata: /messages?sessionId=$sid\n\n", sid)
+                    }
+
+                    isSsePath -> {
+                        log("${session.method} $path → 405")
+                        cors(newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", ""))
+                    }
+
+                    isMessagesPath && isPost -> {
+                        val sid = session.parameters?.get("sessionId")?.firstOrNull()
+                        val out = synchronized(sseStreams) { if (sid != null) sseStreams[sid] else null }
+                        when {
+                            request == null ->
+                                rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
+
+                            out == null -> {
+                                log("POST $path → 404 没有对应的 SSE 流（session=${sid?.take(8) ?: "无"}）")
+                                rpcError(Response.Status.NOT_FOUND, -32600, "Session not found")
+                            }
+
+                            engine.needsNoBody(request) -> {
+                                runBlocking { runCatching { engine.handle(request) } }
+                                log("POST $path → 202 通知（老式传输，不用回东西）")
+                                cors(newFixedLengthResponse(Response.Status.ACCEPTED, "text/plain", ""))
+                            }
+
+                            else -> {
+                                val name = engine.methodName(request)
+                                log("收到 $name（老式传输 / session: ${sid?.take(8)} / body: ${raw.replace("\n", " ").take(120)}）")
+                                val resp = runBlocking {
+                                    runCatching { engine.handle(request) }.getOrElse { e ->
+                                        buildJsonObject {
+                                            put("jsonrpc", JsonPrimitive("2.0"))
+                                            put("id", request["id"] ?: JsonNull)
+                                            put("error", buildJsonObject {
+                                                put("code", JsonPrimitive(-32603))
+                                                put("message", JsonPrimitive(e.message ?: "internal error"))
+                                            })
+                                        }
+                                    }
+                                }
+                                val text = json.encodeToString(JsonElement.serializer(), resp)
+                                // 老规矩：响应从那条 SSE 流回去，POST 本身只回 202
+                                val pushed = try {
+                                    synchronized(out) {
+                                        out.write("event: message\ndata: $text\n\n".toByteArray())
+                                        out.flush()
+                                    }
+                                    true
+                                } catch (e: Exception) {
+                                    log("推流失败：${e.message ?: e.javaClass.simpleName}")
+                                    false
+                                }
+                                log("POST $path → 202 $name（响应${if (pushed) "已推进 SSE 流" else "没推成功"}）")
+                                cors(newFixedLengthResponse(Response.Status.ACCEPTED, "text/plain", ""))
+                            }
+                        }
+                    }
 
                     path == "/health" && !isMcpPath ->
                         cors(newFixedLengthResponse(Response.Status.OK, "text/plain", "ok"))
@@ -201,15 +281,16 @@ class HttpMcpServer(private val engine: McpEngine) {
                             log("GET $path → 405 Accept 里没有 text/event-stream（${accept.ifBlank { "无" }}）")
                             cors(newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", ""))
                         } else {
-                            // 有的客户端（Polaris）什么都不先发，先 GET 开一条 SSE 通道再说话。
-                            // 规范里 GET 不要求先有会话，别拿 400 把它挡回去，先给它一条流。
                             val sid = sessionHeader
-                            when {
-                                sid == null -> log("GET $path → 200 SSE 流（还没有会话，先给它一条空的）")
-                                !touchSession(sid) -> log("GET $path → 200 SSE 流（会话 ${sid.take(8)} 不认识或已过期）")
-                                else -> log("GET $path → 200 SSE 流（会话 ${sid.take(8)}）")
+                            if (sid != null && touchSession(sid)) {
+                                log("GET $path → 200 SSE 流（会话 ${sid.take(8)}）")
+                                sse()
+                            } else {
+                                // 还没会话就来开通道的：顺手把老式传输的 endpoint 也报给它，两条路都留着
+                                val fresh = newSession()
+                                log("GET $path → 200 SSE 流（还没有会话，顺手给了 endpoint：${fresh.take(8)}）")
+                                sse("event: endpoint\ndata: /messages?sessionId=$fresh\n\n", fresh)
                             }
-                            sse()
                         }
                     }
 

@@ -38,7 +38,6 @@ import com.yivi.perception.ui.calendar.CalendarScreen
 import com.yivi.perception.ui.common.GlassCard
 import com.yivi.perception.ui.common.StatementDialog
 import com.yivi.perception.ui.settings.SettingsScreen
-import androidx.core.view.WindowCompat
 import com.yivi.perception.ui.theme.LocalPalette
 import com.yivi.perception.ui.theme.PerceptionTheme
 

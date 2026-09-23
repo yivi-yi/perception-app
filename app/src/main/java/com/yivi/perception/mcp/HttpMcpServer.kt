@@ -197,11 +197,18 @@ class HttpMcpServer(private val engine: McpEngine) {
                     }
 
                     isMcpPath && method == Method.GET -> {
-                        if (sessionHeader == null || !touchSession(sessionHeader)) {
-                            log("GET $path → 400/404 会话不对（session=${sessionHeader?.take(8) ?: "无"}）")
-                            rpcError(Response.Status.BAD_REQUEST, -32600, "Mcp-Session-Id is required")
+                        if (!accept.contains("text/event-stream")) {
+                            log("GET $path → 405 Accept 里没有 text/event-stream（${accept.ifBlank { "无" }}）")
+                            cors(newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", ""))
                         } else {
-                            log("GET $path → 200 SSE 流（Accept: ${accept.ifBlank { "无" }}）")
+                            // 有的客户端（Polaris）什么都不先发，先 GET 开一条 SSE 通道再说话。
+                            // 规范里 GET 不要求先有会话，别拿 400 把它挡回去，先给它一条流。
+                            val sid = sessionHeader
+                            when {
+                                sid == null -> log("GET $path → 200 SSE 流（还没有会话，先给它一条空的）")
+                                !touchSession(sid) -> log("GET $path → 200 SSE 流（会话 ${sid.take(8)} 不认识或已过期）")
+                                else -> log("GET $path → 200 SSE 流（会话 ${sid.take(8)}）")
+                            }
                             sse()
                         }
                     }

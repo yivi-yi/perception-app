@@ -102,6 +102,15 @@ class HttpMcpServer(private val engine: McpEngine) {
         val server = object : NanoHTTPD(port) {
 
             /**
+             * 老式传输的 endpoint 事件：给完整地址。
+             * 有的客户端只认绝对 URL，拿相对路径它就不 POST 了。
+             */
+            private fun endpointEvent(sid: String, session: IHTTPSession): String {
+                val host = session.headers["host"]?.takeIf { it.isNotBlank() } ?: "127.0.0.1:$port"
+                return "event: endpoint\ndata: http://$host/messages?sessionId=$sid\n\n"
+            }
+
+            /**
              * GET 上的 SSE 流：retry + 心跳，客户端断开就结束。
              * initial 是开流时先写出去的内容（老式传输要用它给客户端 endpoint）。
              * 传了 sessionId 就把这条流的出口登记下来，POST 的响应会推到这儿。
@@ -177,7 +186,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val sessionHeader = session.headers["mcp-session-id"]
 
                 val isSsePath = path == "/sse"
-                val isMessagesPath = path == "/messages"
+                val isMessagesPath = path == "/messages" || path == "/message"
                 // /sse 和 /messages 是老式 HTTP+SSE 传输的那两个路径，不算在 Streamable HTTP 里
                 val isMcpPath = !isSsePath && !isMessagesPath &&
                     (path == "/mcp" || path == "/" || (method == Method.POST && path != "/health" && path != "/status"))
@@ -197,7 +206,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                     isSsePath && method == Method.GET -> {
                         val sid = newSession()
                         log("GET $path → 200 SSE 流（老式传输，会话 ${sid.take(8)}）")
-                        sse("event: endpoint\ndata: /messages?sessionId=$sid\n\n", sid)
+                        sse(endpointEvent(sid, session), sid)
                     }
 
                     isSsePath -> {
@@ -289,7 +298,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 // 还没会话就来开通道的：顺手把老式传输的 endpoint 也报给它，两条路都留着
                                 val fresh = newSession()
                                 log("GET $path → 200 SSE 流（还没有会话，顺手给了 endpoint：${fresh.take(8)}）")
-                                sse("event: endpoint\ndata: /messages?sessionId=$fresh\n\n", fresh)
+                                sse(endpointEvent(fresh, session), fresh)
                             }
                         }
                     }

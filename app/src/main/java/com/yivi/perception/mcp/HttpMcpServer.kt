@@ -131,6 +131,8 @@ class HttpMcpServer(private val engine: McpEngine) {
                             out.write("retry: 1000\n\n".toByteArray())
                             if (initial.isNotEmpty()) out.write(initial.toByteArray())
                             out.write(": perception ready\n\n".toByteArray())
+                            // 有的客户端要这条流上出过事件才认"连上了"，给它一条无害的
+                            out.write("event: ping\ndata: {}\n\n".toByteArray())
                             out.flush()
                             // 登记要早：客户端拿到 endpoint 就会立刻 POST 回来
                             if (sessionId != null) synchronized(sseStreams) { sseStreams[sessionId] = out }
@@ -186,7 +188,8 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val sessionHeader = session.headers["mcp-session-id"]
 
                 val isSsePath = path == "/sse"
-                val isMessagesPath = path == "/messages" || path == "/message"
+                // 有的客户端把消息也 POST 回 /sse，一起认了
+                val isMessagesPath = path == "/messages" || path == "/message" || (path == "/sse" && method == Method.POST)
                 // /sse 和 /messages 是老式 HTTP+SSE 传输的那两个路径，不算在 Streamable HTTP 里
                 val isMcpPath = !isSsePath && !isMessagesPath &&
                     (path == "/mcp" || path == "/" || (method == Method.POST && path != "/health" && path != "/status"))
@@ -209,7 +212,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                         sse(endpointEvent(sid, session), sid)
                     }
 
-                    isSsePath -> {
+                    isSsePath && method != Method.POST -> {
                         log("${session.method} $path → 405")
                         cors(newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", ""))
                     }

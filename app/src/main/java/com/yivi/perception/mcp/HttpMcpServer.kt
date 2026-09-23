@@ -63,7 +63,8 @@ class HttpMcpServer(private val engine: McpEngine) {
             while (requestLog.size > 60) requestLog.removeFirst()
         }
         Log.i("PerceptionMcp", stamped)
-        runCatching { com.yivi.perception.PerceptionApp.instance.settings.addLog(stamped) }
+        // 传给 APP 日志的用没带时间戳的：那边会自己加一个，不然一行两个时间
+        runCatching { com.yivi.perception.PerceptionApp.instance.settings.addLog(line) }
     }
 
     private fun newSession(): String {
@@ -274,17 +275,20 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 }
                                 val text = json.encodeToString(JsonElement.serializer(), resp)
                                 val bad = resp["error"] != null
-                                // 官方默认用 SSE 回请求结果；客户端不接受 SSE 才回 JSON
-                                val asSse = accept.contains("text/event-stream")
+                                // 默认回 JSON：规范两种都允许，JSON 没有"这条流什么时候算完"的歧义。
+                                // 手机上有些客户端（Polaris）拿 SSE 会一直等流结束，等成 timeout。
+                                // 只有客户端明确不收 application/json 时才走 SSE。
+                                val asSse = !accept.contains("application/json")
                                 log("POST $path → 200 $name（回 ${if (asSse) "SSE" else "JSON"}）${if (bad) "（报错：${resp["error"]}）" else ""}")
                                 log("响应体：${text.take(200)}")
                                 if (asSse) {
-                                    cors(
-                                        newFixedLengthResponse(
-                                            Response.Status.OK, "text/event-stream; charset=utf-8",
-                                            "event: message\ndata: $text\n\n"
-                                        )
+                                    val r = newFixedLengthResponse(
+                                        Response.Status.OK, "text/event-stream; charset=utf-8",
+                                        "event: message\ndata: $text\n\n"
                                     )
+                                    // 明说这条流就到这里，别让客户端对着 keep-alive 的连接干等
+                                    r.setKeepAlive(false)
+                                    cors(r)
                                 } else {
                                     cors(newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", text))
                                 }

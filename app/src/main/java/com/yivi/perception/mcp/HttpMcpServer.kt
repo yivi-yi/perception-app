@@ -102,6 +102,15 @@ class HttpMcpServer(private val engine: McpEngine) {
         val server = object : NanoHTTPD(port) {
 
             /**
+             * 别给 SSE 上 gzip。
+             * nanohttpd 看到 mimeType 里有 "text/" 就按客户端的 Accept-Encoding 自动压：
+             * 客户端（OkHttp 之类）默认带 gzip，于是这条流被包进 GZIPOutputStream。
+             * 那个流默认不 syncFlush，事件全卡在压缩缓冲里出不去——客户端握手都完不成，
+             * 一直转圈。这个检查在 serve() 之后才跑，挡不掉，只能整个关掉。
+             */
+            override fun useGzipWhenAccepted(r: Response): Boolean = false
+
+            /**
              * 老式传输的 endpoint 事件：给完整地址。
              * 有的客户端只认绝对 URL，拿相对路径它就不 POST 了。
              */
@@ -224,7 +233,11 @@ class HttpMcpServer(private val engine: McpEngine) {
                             ?: session.parameters?.get("session_id")?.firstOrNull()
                             ?: path.split("/").filter { it.isNotBlank() }.getOrNull(1)
                             ?: sessionHeader
-                        val out = synchronized(sseStreams) { if (sid != null) sseStreams[sid] else null }
+                        val out = synchronized(sseStreams) {
+                            // 会话号没带上的（有的客户端不认 endpoint 事件，把消息直接 POST 回原地址）：
+                            // 只有一条活跃的流时就用它，不然它只能拿到 404 干转圈
+                            (if (sid != null) sseStreams[sid] else null) ?: sseStreams.values.lastOrNull()
+                        }
                         when {
                             request == null ->
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")

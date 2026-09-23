@@ -131,15 +131,16 @@ class HttpMcpServer(private val engine: McpEngine) {
                             // 先把出口登记上再发数据：客户端拿到 endpoint 会立刻 POST 回来，
                             // 慢一步就可能撞上"没有对应的流"
                             if (sessionId != null) synchronized(sseStreams) { sseStreams[sessionId] = out }
-                            out.write("retry: 1000\r\n\r\n".toByteArray())
+                            // endpoint 放最前面：有的解析器会被前面的 retry 行带偏，等不到事件
                             if (initial.isNotEmpty()) out.write(initial.replace("\n", "\r\n").toByteArray())
+                            out.write("retry: 1000\r\n\r\n".toByteArray())
                             out.write(": perception ready\r\n\r\n".toByteArray())
                             // 有的客户端要这条流上出过事件才认"连上了"，给它一条无害的
                             out.write("event: ping\r\ndata: {}\r\n\r\n".toByteArray())
                             out.flush()
                             var beats = 0
-                            while (beats < 40) {
-                                Thread.sleep(15000)
+                            while (beats < 120) {
+                                Thread.sleep(5000)
                                 synchronized(out) {
                                     out.write(": ping\r\n\r\n".toByteArray())
                                     out.flush()
@@ -221,6 +222,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                     isMessagesPath && isPost -> {
                         val sid = session.parameters?.get("sessionId")?.firstOrNull()
                             ?: session.parameters?.get("session_id")?.firstOrNull()
+                            ?: path.split("/").filter { it.isNotBlank() }.getOrNull(1)
                             ?: sessionHeader
                         val out = synchronized(sseStreams) { if (sid != null) sseStreams[sid] else null }
                         when {
@@ -321,6 +323,11 @@ class HttpMcpServer(private val engine: McpEngine) {
 
                     isMcpPath && isPost -> {
                         val knownSession = sessionHeader != null && touchSession(sessionHeader)
+                        // 会话头没带或对不上，不再直接 400/404 打回去：手机上的客户端实现参差不齐，
+                        // 先让它跑通要紧（规范允许报错，但不值得为这个把请求断掉）
+                        if (!isInitialize && !knownSession) {
+                            log("POST $path → 会话头${if (sessionHeader == null) "没带" else "对不上（${sessionHeader.take(8)}）"}，照常处理")
+                        }
 
                         when {
                             // 跟官方一样：Accept 必须两个都要，Content-Type 必须是 json
@@ -341,16 +348,6 @@ class HttpMcpServer(private val engine: McpEngine) {
                             protocolHeader != null && protocolHeader !in supportedVersions -> {
                                 log("POST $path → 400 协议版本不认（$protocolHeader）")
                                 rpcError(Response.Status.BAD_REQUEST, -32600, "Unsupported protocol version: $protocolHeader")
-                            }
-
-                            !isInitialize && sessionHeader == null -> {
-                                log("POST $path → 400 少了 Mcp-Session-Id")
-                                rpcError(Response.Status.BAD_REQUEST, -32600, "Bad Request: Mcp-Session-Id header is required")
-                            }
-
-                            !isInitialize && !knownSession -> {
-                                log("POST $path → 404 会话对不上（${sessionHeader?.take(8)}），客户端会重新 initialize")
-                                rpcError(Response.Status.NOT_FOUND, -32600, "Session not found")
                             }
 
                             engine.needsNoBody(request) -> {

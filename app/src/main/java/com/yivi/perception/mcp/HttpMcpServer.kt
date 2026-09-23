@@ -413,7 +413,7 @@ class HttpMcpServer(private val engine: McpEngine) {
             }
         }
         try {
-            server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            server.start(30000, false)
             httpd = server
             lastError = null
             log("服务起来了，监听 0.0.0.0:$port")
@@ -442,6 +442,9 @@ class HttpMcpServer(private val engine: McpEngine) {
         r.addHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
         r.addHeader("Access-Control-Allow-Headers", "*")
         r.addHeader("Access-Control-Expose-Headers", "Mcp-Session-Id")
+        // 每条响应用完就关连接：NanoHTTPD 空闲 5 秒会自己把连接关掉，但客户端不知道，
+        // 下次复用它就会卡到超时——明说 close 最省事（本机 loopback，重连不要钱）
+        r.setKeepAlive(false)
         return r
     }
 

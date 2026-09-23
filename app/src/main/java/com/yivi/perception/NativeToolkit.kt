@@ -160,7 +160,7 @@ class NativeToolkit(
                 result = l
                 latch.countDown()
             }
-            latch.await(6, TimeUnit.SECONDS)
+            latch.await(4, TimeUnit.SECONDS)
             result
         }
     } catch (e: Exception) {
@@ -181,7 +181,7 @@ class NativeToolkit(
         }
         val text = httpGet(
             "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=$lat&longitude=$lng&localityLanguage=zh",
-            8000
+            5000
         )
         val j = jsonObj(text) ?: return ""
         return listOfNotNull(
@@ -208,7 +208,7 @@ class NativeToolkit(
             val geo = jsonObj(
                 httpGet(
                     "https://geocoding-api.open-meteo.com/v1/search?name=${encode(wanted)}&count=1&language=zh&format=json",
-                    10000
+                    6000
                 )
             )
             val first = geo?.get("results")?.asArray()?.firstOrNull()?.jsonObject
@@ -231,7 +231,7 @@ class NativeToolkit(
                 "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m" +
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
                 "&timezone=auto&forecast_days=3",
-            12000
+            6000
         )
         val root = jsonObj(text)
             ?: return@withContext weatherFallback(lat, lng, place, wantForecast)
@@ -271,7 +271,7 @@ class NativeToolkit(
 
     /** 备用天气源：wttr.in，也不用 key */
     private fun weatherFallback(lat: Double, lng: Double, place: String, wantForecast: Boolean): Map<String, Any>? {
-        val root = jsonObj(httpGet("https://wttr.in/$lat,$lng?format=j1", 12000)) ?: return null
+        val root = jsonObj(httpGet("https://wttr.in/$lat,$lng?format=j1", 6000)) ?: return null
         val cur = root["current_condition"]?.asArray()?.firstOrNull()?.jsonObject ?: return null
         val days = if (!wantForecast) emptyList() else root["weather"]?.asArray()?.take(3)?.map { d ->
             val o = d.jsonObject
@@ -462,7 +462,7 @@ class NativeToolkit(
      * 采集一小段时间的传感器数据（不是只取第一帧）。
      * 光感/步数这类传感器有时只在变化或走路时上报，采不到就返回空，由调用方说明。
      */
-    private fun readSamples(sm: SensorManager, type: Int, windowMs: Long = 1000, maxSamples: Int = 24): List<FloatArray> {
+    private fun readSamples(sm: SensorManager, type: Int, windowMs: Long = 800, maxSamples: Int = 24): List<FloatArray> {
         // 有 wake-up 版就用它：息屏时普通传感器不上报，读出来是空或者一堆 0
         val sensor = sm.getDefaultSensor(type, true) ?: sm.getDefaultSensor(type) ?: return emptyList()
         val samples = mutableListOf<FloatArray>()
@@ -804,7 +804,7 @@ class NativeToolkit(
         val n = limit.coerceIn(1, 10)
         val text = httpGet(
             "https://music.163.com/api/search/get/web?s=${encode(keyword)}&type=1&limit=$n",
-            10000,
+            6000,
             mapOf("Referer" to "https://music.163.com/")
         )
         val root = jsonObj(text)

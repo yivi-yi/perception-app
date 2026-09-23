@@ -38,9 +38,9 @@ data class Palette(
     val glassTint: Color
         get() = if (isDark) Color(0xFF17171B).copy(alpha = 0.30f) else Color.White.copy(alpha = 0.42f)
 
-    /** 弹窗底色：跟主题色，稍微沾一点主色 */
+    /** 弹窗底色：跟主题色，稍微沾一点主色（暗色下沾多了会发红，压到很低） */
     val dialogTint: Color
-        get() = lerp(surface, accent, if (isDark) 0.10f else 0.05f)
+        get() = lerp(surface, accent, if (isDark) 0.04f else 0.05f)
 
     val titleBrush: Brush get() = Brush.linearGradient(listOf(textPrimary, accent, textPrimary))
 

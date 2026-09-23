@@ -94,7 +94,6 @@ private fun makeSoftBackdrop(palette: com.yivi.perception.ui.theme.Palette): Ima
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     val accent = palette.accent.toArgb()
-    canvas.drawColor(if (palette.isDark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
 
     fun blob(cx: Float, cy: Float, r: Float, color: Int, alpha: Int) {
         paint.shader = RadialGradient(
@@ -107,14 +106,14 @@ private fun makeSoftBackdrop(palette: com.yivi.perception.ui.theme.Palette): Ima
     }
 
     if (palette.isDark) {
-        // 暗色：底就是黑，主色只留一点点，别糊成一片紫
-        blob(w * 0.20f, h * 0.10f, w * 1.5f, accent, 0x14)
-        blob(w * 0.90f, h * 0.95f, w * 1.6f, accent, 0x10)
+        // 暗色：纯黑。之前这里叠了两团主色光晕，图小又被放大，整屏就泛红
+        canvas.drawColor(android.graphics.Color.BLACK)
     } else {
-        // 亮色：白底上一层非常淡的主色，淡到只是"有点粉/有点蓝"的程度
-        blob(w * 0.15f, h * 0.12f, w * 1.6f, accent, 0x16)
-        blob(w * 1.00f, h * 0.55f, w * 1.4f, accent, 0x10)
-        blob(w * 0.50f, h * 0.95f, w * 1.8f, accent, 0x18)
+        // 亮色：白底上一点点主色，淡到只是"有点色调"
+        canvas.drawColor(android.graphics.Color.WHITE)
+        blob(w * 0.15f, h * 0.12f, w * 1.6f, accent, 0x0A)
+        blob(w * 1.00f, h * 0.55f, w * 1.4f, accent, 0x08)
+        blob(w * 0.50f, h * 0.95f, w * 1.8f, accent, 0x0C)
     }
     bmp.asImageBitmap()
 } catch (e: Exception) {

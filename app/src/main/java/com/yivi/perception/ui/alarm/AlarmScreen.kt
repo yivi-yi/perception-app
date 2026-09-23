@@ -65,6 +65,7 @@ fun AlarmScreen(
     val palette = LocalPalette.current
     val alarms by vm.alarms.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
+    var editingAlarm by remember { mutableStateOf<EventEntity?>(null) }
     var pendingDelete by remember { mutableStateOf<EventEntity?>(null) }
 
     val nextOne = alarms.filter { it.remind }
@@ -109,18 +110,28 @@ fun AlarmScreen(
                     palette = palette,
                     alarm = alarm,
                     onToggle = { vm.toggle(alarm) },
+                    onPress = { editingAlarm = alarm },
                     onLongPress = { pendingDelete = alarm }
                 )
                 Spacer(Modifier.height(12.dp))
             }
             Spacer(Modifier.height(2.dp))
-            Text("长按一条可以删除", fontSize = 11.sp, color = palette.textDim)
+            Text("点一下改，长按删除", fontSize = 11.sp, color = palette.textDim)
         }
         Spacer(Modifier.height(120.dp))
     }
 
-    if (showAdd) {
-        AlarmDialog(onDismiss = { showAdd = false }, onSave = { vm.add(it); showAdd = false })
+    if (showAdd || editingAlarm != null) {
+        val editing = editingAlarm
+        AlarmDialog(
+            editing = editing,
+            onDismiss = { showAdd = false; editingAlarm = null },
+            onSave = { e ->
+                if (editing != null) vm.update(e) else vm.add(e)
+                showAdd = false
+                editingAlarm = null
+            }
+        )
     }
 
     pendingDelete?.let { e ->
@@ -183,13 +194,14 @@ private fun AlarmCard(
     palette: Palette,
     alarm: EventEntity,
     onToggle: () -> Unit,
+    onPress: () -> Unit,
     onLongPress: () -> Unit
 ) {
     val on = alarm.remind
     val next = if (on) AlarmScheduler.nextTrigger(alarm) else null
 
     GlassCard(
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = onLongPress),
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onPress, onLongClick = onLongPress),
         shape = RoundedCornerShape(24.dp),
         showHighlight = false
     ) {

@@ -507,7 +507,7 @@ fun SettingsScreen() {
                     Modifier.fillMaxWidth().clickable { clearStep = 1 }.padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("清空全部数据", color = Color(0xFFFF8095), fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text("清空全部数据", color = palette.danger, fontSize = 14.sp, modifier = Modifier.weight(1f))
                     Text("日程 · 闹钟 · 设置", color = palette.textDim, fontSize = 12.sp)
                 }
             }

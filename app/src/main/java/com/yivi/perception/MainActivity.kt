@@ -31,13 +31,13 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import com.yivi.perception.ui.AppBackground
 import com.yivi.perception.ui.alarm.AlarmScreen
 import com.yivi.perception.ui.calendar.CalendarScreen
 import com.yivi.perception.ui.common.GlassCard
 import com.yivi.perception.ui.common.StatementDialog
 import com.yivi.perception.ui.settings.SettingsScreen
-import com.yivi.perception.ui.theme.LocalPalette
 import androidx.core.view.WindowCompat
 import com.yivi.perception.ui.theme.LocalPalette
 import com.yivi.perception.ui.theme.PerceptionTheme

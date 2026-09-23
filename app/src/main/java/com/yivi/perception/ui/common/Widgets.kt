@@ -94,7 +94,7 @@ fun ActionPill(
             Text(
                 text,
                 fontSize = 14.sp,
-                color = if (danger) Color(0xFFFF8095) else palette.accent
+                color = if (danger) palette.danger else palette.accent
             )
         }
     }

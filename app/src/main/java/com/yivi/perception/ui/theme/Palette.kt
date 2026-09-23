@@ -20,6 +20,7 @@ data class Palette(
     val textPrimary: Color,
     val textSecondary: Color,
     val lineViolet: Color,
+    val danger: Color,
     val isDark: Boolean
 ) {
     val text: Color get() = textPrimary
@@ -45,9 +46,9 @@ data class Palette(
 
     companion object {
         fun of(accentKind: String, dark: Boolean): Palette {
-            val pink = if (dark) Color(0xFFFF9FB0) else Color(0xFFD96E86)
-            val blue = if (dark) Color(0xFFAFC2D8) else Color(0xFF7C8FA6)
-            val gray = if (dark) Color(0xFFB9B9B9) else Color(0xFF828282)
+            val pink = if (dark) Color(0xFFFF9FB0) else Color(0xFFC2556F)
+            val blue = if (dark) Color(0xFFAFC2D8) else Color(0xFF5F7691)
+            val gray = if (dark) Color(0xFFB9B9B9) else Color(0xFF6B6B6B)
             val accent = when (accentKind) {
                 "blue" -> blue
                 "gray" -> gray
@@ -61,14 +62,14 @@ data class Palette(
                 cardTop = Color(0xFF232329), cardBottom = Color(0xFF17171B),
                 cardViolet = Color(0xFF2B2B31),
                 textPrimary = Color(0xFFF2F2F4), textSecondary = Color(0xFFB4B4BC),
-                lineViolet = Color(0xFF3B3B42), isDark = true
+                lineViolet = Color(0xFF3B3B42), danger = Color(0xFFFF8095), isDark = true
             ) else Palette(
                 accent = accent, accentSoft = accentSoft,
                 bgTop = Color(0xFFF7F7F8), bgBottom = Color(0xFFEFEFF1),
                 cardTop = Color(0xFFFFFFFF), cardBottom = Color(0xFFF2F2F4),
                 cardViolet = Color(0xFFE6E6E9),
                 textPrimary = Color(0xFF26262A), textSecondary = Color(0xFF6C6C74),
-                lineViolet = Color(0xFFD3D3D8), isDark = false
+                lineViolet = Color(0xFFD3D3D8), danger = Color(0xFFBE3F58), isDark = false
             )
         }
     }

@@ -35,6 +35,15 @@ class CalendarViewModel(
         }
     }
 
+    /** 改一条：旧的排班先撤掉，再按新时间重新排 */
+    fun update(event: EventEntity) {
+        viewModelScope.launch {
+            repo.update(event)
+            AlarmScheduler.cancel(context, event)
+            if (event.remind) AlarmScheduler.schedule(context, event)
+        }
+    }
+
     class Factory(
         private val repo: PerceptionRepository,
         private val context: Context

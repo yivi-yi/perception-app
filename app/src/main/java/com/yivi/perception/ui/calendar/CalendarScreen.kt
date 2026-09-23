@@ -9,8 +9,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -88,7 +91,9 @@ fun CalendarScreen(
     val annivDate by settings.annivDate.collectAsState()
 
     var selected by remember { mutableStateOf(LocalDate.now()) }
+    var todayKey by remember { mutableIntStateOf(0) }
     var showAdd by remember { mutableStateOf(false) }
+    var editingEvent by remember { mutableStateOf<EventEntity?>(null) }
     var showAnniv by remember { mutableStateOf(false) }
     var editingAnniv by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<EventEntity?>(null) }
@@ -113,7 +118,7 @@ fun CalendarScreen(
                 style = MaterialTheme.typography.titleMedium.copy(brush = palette.titleBrush)
             )
             Spacer(Modifier.weight(1f))
-            PillButton("今天", selected == LocalDate.now()) { selected = LocalDate.now() }
+            PillButton("今天", selected == LocalDate.now()) { selected = LocalDate.now(); todayKey++ }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -124,7 +129,7 @@ fun CalendarScreen(
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1.14f)) {
-                    MonthCalendar(palette, selected, marked) { selected = it }
+                    MonthCalendar(palette, selected, marked, todayKey) { selected = it }
                 }
             }
         }
@@ -144,19 +149,27 @@ fun CalendarScreen(
             }
         } else {
             dayList.forEach { e ->
-                ScheduleCard(palette, e) { pendingDelete = e }
+                ScheduleCard(
+                    palette = palette,
+                    e = e,
+                    onClick = { editingEvent = e },
+                    onLongClick = { pendingDelete = e }
+                )
                 Spacer(Modifier.height(10.dp))
             }
+            Text("点一下改，长按删除", fontSize = 11.sp, color = palette.textDim)
         }
         Spacer(Modifier.height(120.dp))
     }
 
-    if (showAdd) {
+    if (showAdd || editingEvent != null) {
+        val editing = editingEvent
         ScheduleDialog(
             initialDate = selected,
-            onDismiss = { showAdd = false },
+            editing = editing,
+            onDismiss = { showAdd = false; editingEvent = null },
             onSave = { e ->
-                vm.add(e)
+                if (editing != null) vm.update(e) else vm.add(e)
                 // 开了提醒但还没给通知权限，顺手要一下，不然到点静悄悄
                 if (e.remind && Build.VERSION.SDK_INT >= 33 &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -164,6 +177,7 @@ fun CalendarScreen(
                     notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
                 showAdd = false
+                editingEvent = null
             }
         )
     }
@@ -203,6 +217,8 @@ fun CalendarScreen(
 /** 纪念日卡：名字 + 大数字 + 起始日期，点一下改 */
 @Composable
 private fun AnnivCard(palette: Palette, name: String, type: String, date: Long, onClick: () -> Unit) {
+    val startDate = if (date > 0) millisToDate(date) else null
+    val future = startDate != null && startDate.isAfter(LocalDate.now())
     GlassCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(22.dp),
@@ -222,7 +238,7 @@ private fun AnnivCard(palette: Palette, name: String, type: String, date: Long, 
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                if (date > 0) annivDays(type, date).toString() else "--",
+                if (startDate != null) annivDays(type, date).toString() else "--",
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Bold,
                 color = palette.text,
@@ -230,8 +246,12 @@ private fun AnnivCard(palette: Palette, name: String, type: String, date: Long, 
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                if (date > 0) (if (type == "倒数") "还有 · ${formatDate(date)}" else "自 ${formatDate(date)}")
-                else "点一下设置",
+                when {
+                    startDate == null -> "点一下设置"
+                    type == "倒数" -> "还有 · ${formatDate(date)}"
+                    future -> "还没到 · ${formatDate(date)}"
+                    else -> "自 ${formatDate(date)}"
+                },
                 fontSize = 10.sp,
                 color = palette.textDim,
                 textAlign = TextAlign.Center
@@ -246,11 +266,20 @@ private fun MonthCalendar(
     palette: Palette,
     selected: LocalDate,
     marked: Set<LocalDate>,
+    resetKey: Int,
     onPick: (LocalDate) -> Unit
 ) {
     var year by remember { mutableIntStateOf(LocalDate.now().year) }
     var month by remember { mutableIntStateOf(LocalDate.now().monthValue) }
     val today = LocalDate.now()
+
+    // 外面选了别的月份的日子（比如点「今天」），这里跟着翻过去
+    LaunchedEffect(selected, resetKey) {
+        if (selected.year != year || selected.monthValue != month) {
+            year = selected.year
+            month = selected.monthValue
+        }
+    }
     val first = LocalDate.of(year, month, 1)
     val daysInMonth = first.lengthOfMonth()
     val leading = first.dayOfWeek.value % 7
@@ -298,7 +327,7 @@ private fun MonthCalendar(
                             val isSel = d == selected
                             Box(
                                 Modifier
-                                    .size(26.dp)
+                                    .fillMaxSize(0.86f)
                                     .clip(CircleShape)
                                     .background(
                                         when {
@@ -312,7 +341,7 @@ private fun MonthCalendar(
                             ) {
                                 Text(
                                     "$day",
-                                    fontSize = 11.5.sp,
+                                    fontSize = 11.sp,
                                     color = if (isSel) Color.White else palette.text,
                                     fontWeight = if (isSel || isToday) FontWeight.Medium else FontWeight.Normal
                                 )
@@ -349,10 +378,16 @@ private fun CalendarNav(label: String, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ScheduleCard(palette: Palette, e: EventEntity, onDelete: () -> Unit) {
+private fun ScheduleCard(
+    palette: Palette,
+    e: EventEntity,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
     GlassCard(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onDelete),
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = RoundedCornerShape(20.dp),
         showHighlight = false
     ) {
@@ -458,7 +493,8 @@ private fun annivDays(type: String, millis: Long): Long {
     return if (type == "倒数") {
         ChronoUnit.DAYS.between(today, start).coerceAtLeast(0)
     } else {
-        kotlin.math.abs(ChronoUnit.DAYS.between(start, today))
+        // 正数：起始日还没到就是 0，不要算成"已经过去了多少天"
+        ChronoUnit.DAYS.between(start, today).coerceAtLeast(0)
     }
 }
 

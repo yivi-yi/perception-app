@@ -35,6 +35,15 @@ class AlarmViewModel(
         }
     }
 
+    /** 改一条：旧的排班先撤掉，再按新的排上（关着的不排） */
+    fun update(alarm: EventEntity) {
+        viewModelScope.launch {
+            repo.update(alarm)
+            AlarmScheduler.cancel(context, alarm)
+            if (alarm.remind) AlarmScheduler.schedule(context, alarm)
+        }
+    }
+
     /** 开关：借 remind 字段存"这条闹钟开着没" */
     fun toggle(alarm: EventEntity) {
         viewModelScope.launch {

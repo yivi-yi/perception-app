@@ -219,7 +219,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                     // ── 老式 HTTP+SSE 传输（2024-11-05 那套）：GET /sse 开流，POST /messages 发消息 ──
                     isSsePath && method == Method.GET -> {
                         val sid = newSession()
-                        log("GET $path → 200 SSE 流（老式传输，会话 ${sid.take(8)}）")
+                        log("GET $path → 200 SSE 流（老式传输，会话 ${sid.take(8)} · UA ${ua.ifBlank { "无" }} · AE ${session.headers["accept-encoding"] ?: "无"}）")
                         sse(endpointEvent(sid, session), sid)
                     }
 
@@ -429,7 +429,7 @@ class HttpMcpServer(private val engine: McpEngine) {
             server.start(30000, false)
             httpd = server
             lastError = null
-            log("服务起来了，监听 0.0.0.0:$port")
+            log("服务起来了，监听 0.0.0.0:$port · 0924-2")
             onReady(port)
         } catch (e: Exception) {
             lastError = e.message ?: e.javaClass.simpleName

@@ -147,6 +147,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                             // 有的客户端要这条流上出过事件才认"连上了"，给它一条无害的
                             out.write("event: ping\r\ndata: {}\r\n\r\n".toByteArray())
                             out.flush()
+                            log("SSE 流已写出（会话 ${sessionId?.take(8) ?: "无"}）")
                             var beats = 0
                             while (beats < 120) {
                                 Thread.sleep(5000)
@@ -160,6 +161,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                             // 客户端走了
                         } finally {
                             if (sessionId != null) synchronized(sseStreams) { sseStreams.remove(sessionId) }
+                            log("SSE 流结束（会话 ${sessionId?.take(8) ?: "无"}）")
                             runCatching { out.close() }
                         }
                     }
@@ -197,6 +199,9 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val ua = (session.headers["user-agent"] ?: "").take(40)
                 val protocolHeader = session.headers["mcp-protocol-version"]
                 val sessionHeader = session.headers["mcp-session-id"]
+
+                // 请求进来先记一条：下面任何一步卡住了，起码知道是谁发的、发的什么
+                log("→ ${session.method} $path · UA ${ua.ifBlank { "无" }} · Accept ${accept.ifBlank { "无" }} · CL ${session.headers["content-length"] ?: "无"} · AE ${session.headers["accept-encoding"] ?: "无"}")
 
                 val isSsePath = path == "/sse"
                 // 有的客户端把消息也 POST 回 /sse，一起认了
@@ -347,8 +352,9 @@ class HttpMcpServer(private val engine: McpEngine) {
                             request == null ->
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
 
-                            // 注意：客户端 Accept 里写的就是不带 charset 的媒体类型，别拿响应那套来比
-                            !accept.contains("application/json") || !accept.contains("text/event-stream") -> {
+                            // 注意：客户端 Accept 里写的就是不带 charset 的媒体类型，别拿响应那套来比。
+                            // 两种都不收才拒；只收一种的照常回（规范说该 406，但客户端花样太多）
+                            !accept.contains("application/json") && !accept.contains("text/event-stream") -> {
                                 log("POST $path → 406 Accept 不对（$accept）")
                                 rpcError(Response.Status.NOT_ACCEPTABLE, -32600, "Not Acceptable: Client must accept both application/json and text/event-stream")
                             }
@@ -429,7 +435,7 @@ class HttpMcpServer(private val engine: McpEngine) {
             server.start(30000, false)
             httpd = server
             lastError = null
-            log("服务起来了，监听 0.0.0.0:$port · 0924-2")
+            log("服务起来了，监听 0.0.0.0:$port · 0924-3")
             onReady(port)
         } catch (e: Exception) {
             lastError = e.message ?: e.javaClass.simpleName
@@ -455,9 +461,12 @@ class HttpMcpServer(private val engine: McpEngine) {
         r.addHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
         r.addHeader("Access-Control-Allow-Headers", "*")
         r.addHeader("Access-Control-Expose-Headers", "Mcp-Session-Id")
-        // 每条响应用完就关连接：NanoHTTPD 空闲 5 秒会自己把连接关掉，但客户端不知道，
-        // 下次复用它就会卡到超时——明说 close 最省事（本机 loopback，重连不要钱）
+        // 每条响应用完就把连接关掉。setKeepAlive(false) 没用：HTTPSession.execute() 会拿请求头
+        // 重新算一遍 keepAlive 盖掉它，所以之前那行等于没写，响应里一直还是 keep-alive。
+        // 只有小写这个头名才同时被 isCloseConnection() 和发头那步认到：发出去是 close，发完就关。
+        // 有些客户端（Polaris 就是）会一直等响应的流结束才往下走，不关就成了 timeout。
         r.setKeepAlive(false)
+        r.addHeader("connection", "close")
         return r
     }
 
@@ -479,7 +488,23 @@ class HttpMcpServer(private val engine: McpEngine) {
             }
             buf.copyOf(read)
         } else {
-            stream.readBytes()
+            // 没给 Content-Length 的（分块上传一类）不能读到底：这个连接是 keep-alive，
+            // 读到底就是永远读不完，客户端等不到响应报 timeout，日志里还一条都不留。
+            // 给它 1.5 秒，读到多少算多少。
+            val out = java.io.ByteArrayOutputStream()
+            val tmp = ByteArray(4096)
+            val deadline = System.currentTimeMillis() + 1500
+            while (System.currentTimeMillis() < deadline) {
+                val avail = runCatching { stream.available() }.getOrDefault(0)
+                if (avail <= 0) {
+                    Thread.sleep(20)
+                    continue
+                }
+                val n = stream.read(tmp, 0, minOf(tmp.size, avail))
+                if (n <= 0) break
+                out.write(tmp, 0, n)
+            }
+            out.toByteArray()
         }
         String(bytes, Charsets.UTF_8)
     } catch (e: Exception) {

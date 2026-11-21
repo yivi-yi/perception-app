@@ -55,6 +55,10 @@ class HttpMcpServer(private val engine: McpEngine) {
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private val requestLog = ArrayDeque<String>()
 
+    /** GET 那条长流的日志节流用：客户端一分钟重连一次，全记会把有用的挤没 */
+    @Volatile
+    private var lastGetLogAt = 0L
+
     /** 老式 HTTP+SSE 传输：sessionId → 那条流的出口，POST 进来的响应往这里推 */
     private val sseStreams = mutableMapOf<String, java.io.OutputStream>()
 
@@ -64,7 +68,7 @@ class HttpMcpServer(private val engine: McpEngine) {
         val stamped = "${timeFmt.format(Date())} $line"
         synchronized(requestLog) {
             requestLog.addLast(stamped)
-            while (requestLog.size > 60) requestLog.removeFirst()
+            while (requestLog.size > 200) requestLog.removeFirst()
         }
         Log.i("PerceptionMcp", stamped)
         // 传给 APP 日志的用没带时间戳的：那边会自己加一个，不然一行两个时间
@@ -201,8 +205,14 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val protocolHeader = session.headers["mcp-protocol-version"]
                 val sessionHeader = session.headers["mcp-session-id"]
 
-                // 请求进来先记一条：下面任何一步卡住了，起码知道是谁发的、发的什么
-                log("→ ${session.method} $path · UA ${ua.ifBlank { "无" }} · Accept ${accept.ifBlank { "无" }} · CL ${session.headers["content-length"] ?: "无"} · AE ${session.headers["accept-encoding"] ?: "无"}")
+                // 请求进来先记一条：下面任何一步卡住了，起码知道是谁发的、发的什么。
+                // GET 是客户端挂着的那条长流，一分钟重连一次，全记下来会把真正有用的挤掉，
+                // 所以 GET 节流成 30 秒一条；POST / DELETE 一条不落。
+                val nowMs = System.currentTimeMillis()
+                if (method != Method.GET || nowMs - lastGetLogAt > 30_000L) {
+                    if (method == Method.GET) lastGetLogAt = nowMs
+                    log("→ ${session.method} $path · UA ${ua.ifBlank { "无" }} · Accept ${accept.ifBlank { "无" }} · CL ${session.headers["content-length"] ?: "无"} · TE ${session.headers["transfer-encoding"] ?: "无"} · AE ${session.headers["accept-encoding"] ?: "无"}")
+                }
 
                 val isSsePath = path == "/sse"
                 // 有的客户端把消息也 POST 回 /sse，一起认了
@@ -244,7 +254,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                         }
                         when {
                             request == null -> {
-                                log("POST $path → 400 解析不了 body（TE=${session.headers["transfer-encoding"] ?: "无"} / CL=${session.headers["content-length"] ?: "无"} / 读到 ${raw.length} 字：${raw.take(120).replace("\n", " ")}）")
+                                log("POST $path → 400 解析不了 body（${bodyDump(session, raw)}）")
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
                             }
 
@@ -321,10 +331,16 @@ class HttpMcpServer(private val engine: McpEngine) {
                             if (sid != null && touchSession(sid)) {
                                 log("GET $path → 200 SSE 流（会话 ${sid.take(8)}）")
                                 sse()
+                            } else if (path == "/mcp") {
+                                // /mcp 是 Streamable HTTP：开流就是单纯等服务器推事件，绝不能在这里发
+                                // 老式传输的 endpoint 事件 —— 混着发，客户端会掉头去 POST /messages，
+                                // 自己那条 initialize 反而没人接（chatbox 那一串就是这么拧着的）
+                                log("GET $path → 200 SSE 流（还没有会话，纯开流不报 endpoint）")
+                                sse()
                             } else {
-                                // 还没会话就来开通道的：顺手把老式传输的 endpoint 也报给它，两条路都留着
+                                // 只有老式传输的入口（/ 或 /sse）才给 endpoint
                                 val fresh = newSession()
-                                log("GET $path → 200 SSE 流（还没有会话，顺手给了 endpoint：${fresh.take(8)}）")
+                                log("GET $path → 200 SSE 流（老式传输，给 endpoint：${fresh.take(8)}）")
                                 sse(endpointEvent(fresh, session), fresh)
                             }
                         }
@@ -358,7 +374,7 @@ class HttpMcpServer(private val engine: McpEngine) {
 
                             // 跟官方一样：Accept 必须两个都要，Content-Type 必须是 json
                             request == null -> {
-                                log("POST $path → 400 解析不了 body（TE=${session.headers["transfer-encoding"] ?: "无"} / CL=${session.headers["content-length"] ?: "无"} / 读到 ${raw.length} 字：${raw.take(120).replace("\n", " ")}）")
+                                log("POST $path → 400 解析不了 body（${bodyDump(session, raw)}）")
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
                             }
 
@@ -478,6 +494,16 @@ class HttpMcpServer(private val engine: McpEngine) {
         r.setKeepAlive(false)
         r.addHeader("connection", "close")
         return r
+    }
+
+    /** 解析失败时把原始请求体摊开：长度、前 120 字、头 48 字节的十六进制 */
+    private fun bodyDump(session: IHTTPSession, raw: String): String {
+        val hex = raw.toByteArray(Charsets.UTF_8).take(48)
+            .joinToString(" ") { String.format(Locale.US, "%02x", it) }
+        val te = session.headers["transfer-encoding"] ?: "无"
+        val cl = session.headers["content-length"] ?: "无"
+        val head = if (hex.isBlank()) "（空）" else hex
+        return "TE=$te / CL=$cl / 读到 ${raw.length} 字：${raw.take(120).replace("\n", " ")} / 头 $head"
     }
 
     /**

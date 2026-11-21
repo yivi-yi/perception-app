@@ -379,6 +379,12 @@ class HttpMcpServer(private val engine: McpEngine) {
                             )
                         }
 
+                        // 新客户端会先报 2026-07-28 这种版本号来探路，认不认识都不该拦：
+                        // 拦了它连 initialize 都不发，用户只看到一句莫名其妙的错。记一笔就放行。
+                        if (protocolHeader != null && protocolHeader !in supportedVersions) {
+                            log("POST $path → 版本头 $protocolHeader 不在认识的范围里，照常按 2025 那套处理")
+                        }
+
                         when {
                             // 有客户端会先发一个空 body 的 POST 探路（看服务端还在不在）。
                             // 这种不该当语法错误打回去，202 就够它继续往下走。
@@ -405,12 +411,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                                 rpcError(Response.Status.UNSUPPORTED_MEDIA_TYPE, -32600, "Unsupported Media Type: Content-Type must be application/json")
                             }
 
-                            protocolHeader != null && protocolHeader !in supportedVersions -> {
-                                // 新客户端会先报 2026-07-28 这种版本号来探路，认不认识都不该拦：
-                                // 拦了它连 initialize 都不发，用户只看到一句莫名其妙的错。记一笔就放行。
-                                log("POST $path → 版本头 $protocolHeader 不在认识的范围里，照常按 2025 那套处理")
-                                false
-                            }
+
 
                             engine.needsNoBody(request) -> {
                                 val what = request["method"]?.jsonPrimitive?.contentOrNull ?: "response"

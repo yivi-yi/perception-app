@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -212,9 +213,7 @@ class HttpMcpServer(private val engine: McpEngine) {
                 val isPost = method == Method.POST
                 // POST 先读 body（后面判 initialize、判会话头都要用）
                 val raw = if (isPost) readBody(session) else ""
-                val request = if (isPost) {
-                    runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
-                } else null
+                val request = if (isPost) parseRequest(raw) else null
                 val isInitialize = request?.get("method")?.jsonPrimitive?.contentOrNull == "initialize"
 
                 val response: Response = when {
@@ -479,6 +478,25 @@ class HttpMcpServer(private val engine: McpEngine) {
         r.setKeepAlive(false)
         r.addHeader("connection", "close")
         return r
+    }
+
+    /**
+     * 把请求体解成 JSON。
+     * 先老实解一遍；解不了再从里面抠最外层的 {...} 试一次 —— 有的客户端（或者 chunked 没解干净）
+     * 会把长度前缀之类的东西粘在前面，内容其实是好的，没必要为此整个报 parse error。
+     */
+    private fun parseRequest(raw: String): JsonObject? {
+        val text = raw.trim()
+        if (text.isEmpty()) return null
+        runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()?.let { return it }
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start >= 0 && end > start) {
+            runCatching {
+                json.parseToJsonElement(text.substring(start, end + 1)).jsonObject
+            }.getOrNull()?.let { return it }
+        }
+        return null
     }
 
     /**

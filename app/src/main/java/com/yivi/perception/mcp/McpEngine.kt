@@ -163,6 +163,7 @@ class McpEngine(
             "ambient" -> toolkit.ambient()
             "search_song" -> toolkit.searchSong(s("keyword") ?: "", (l("limit") ?: 5L).toInt())
             "play_song" -> toolkit.playSong(l("id") ?: -1L, s("name") ?: "")
+            "check_permissions" -> toolkit.healthCheck()
             else -> mapOf("ok" to false, "error" to "没有这个工具：$name")
         }
 

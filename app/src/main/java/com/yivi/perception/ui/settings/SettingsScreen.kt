@@ -107,6 +107,8 @@ fun SettingsScreen() {
     }
     var showTools by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
+    var showHealth by remember { mutableStateOf(false) }
+    var healthData by remember { mutableStateOf<Map<String, Any>?>(null) }
     var clearStep by remember { mutableStateOf(0) }
     val plainText by settings.toolPlainText.collectAsState()
     var selfTestRunning by remember { mutableStateOf(false) }
@@ -420,6 +422,18 @@ fun SettingsScreen() {
                 PermissionRow("勿扰权限（改勿扰用）", dndOk) { openDndAccess(context) }
                 ThinDivider()
                 PermissionRow("悬浮窗（开着服务更稳）", overlayOk) { openOverlayAccess(context) }
+                ThinDivider()
+                JumpRow(
+                    title = "权限自检",
+                    value = "一次看全，缺哪项去哪开",
+                    valueColor = palette.textDim,
+                    onClick = {
+                        healthData = runCatching {
+                            PerceptionApp.instance.toolkit.healthCheck()
+                        }.getOrNull()
+                        showHealth = true
+                    }
+                )
                 Spacer(Modifier.height(4.dp))
                 Text("· 应用时间线：系统设置 → 特殊应用权限 → 使用情况访问", color = palette.textDim, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
@@ -635,6 +649,73 @@ fun SettingsScreen() {
                 }
             },
             confirmButton = { TextButton(onClick = { showLogs = false }) { Text("关闭", color = MaterialTheme.colorScheme.primary) } }
+        )
+    }
+
+    if (showHealth) {
+        val data = healthData
+        val checks = (data?.get("checks") as? List<*>)?.mapNotNull { it as? Map<*, *> } ?: emptyList()
+        val manual = (data?.get("manual") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        AlertDialog(
+            onDismissRequest = { showHealth = false },
+            containerColor = palette.dialogTint,
+            shape = RoundedCornerShape(22.dp),
+            title = { Text("权限自检", color = palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium) },
+            text = {
+                Column(
+                    Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    (data?.get("device") as? String)?.let {
+                        Text(it, color = palette.textDim, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (data == null) {
+                        Text("没查到，重开一次试试", color = palette.textLight, fontSize = 12.sp)
+                    }
+                    checks.forEach { row ->
+                        val name = row["name"] as? String ?: ""
+                        val ok = row["ok"] == true
+                        val hint = row["hint"] as? String ?: ""
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (ok) palette.accent else palette.chipBg.copy(alpha = 0.9f))
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(name, color = palette.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                if (ok) "已开" else "没开",
+                                color = if (ok) palette.accent else palette.textDim,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                        if (!ok && hint.isNotBlank()) {
+                            Text("　$hint", color = palette.textDim, fontSize = 10.5.sp, lineHeight = 15.sp)
+                        }
+                    }
+                    if (manual.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text("这几样系统不给查，得自己去开：", color = palette.textLight, fontSize = 11.5.sp)
+                        manual.forEach {
+                            Text(
+                                "· $it",
+                                color = palette.textDim,
+                                fontSize = 10.5.sp,
+                                lineHeight = 15.sp,
+                                modifier = Modifier.padding(top = 3.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showHealth = false }) { Text("关闭", color = MaterialTheme.colorScheme.primary) } }
         )
     }
 }

@@ -1,6 +1,9 @@
 package com.yivi.perception
 
 import android.Manifest
+import android.app.AppOpsManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -825,47 +828,280 @@ class NativeToolkit(
         mapOf("ok" to true, "keyword" to keyword, "count" to songs.size, "songs" to songs)
     }
 
-    /** 点歌：按 id 跳本机网易云的歌曲页 */
+    /**
+     * 点歌：唤起本机网易云播这首歌。
+     * 不再「发出去了就当成功」——起完会等一会儿，再看一眼前台到底是不是网易云。
+     * 看不到前台的时候（没开使用情况访问、无障碍也没接上）会老老实实说确认不了。
+     */
     suspend fun playSong(id: Long, name: String): Map<String, Any> = withContext(Dispatchers.IO) {
         if (id <= 0L) {
             return@withContext mapOf("ok" to false, "error" to "要传歌曲 id：先用 search_song 搜出 id")
         }
-        val how = openNetEase(id)
-        mapOf(
-            "ok" to (how != null),
-            "id" to id,
-            "name" to name,
-            "route" to (how ?: "没跳成"),
-            "note" to if (how != null) {
-                "已经用「$how」打开这首歌了"
-            } else {
-                "没打开：这台手机没装网易云音乐，网页版也没调起来"
-            }
-        )
-    }
+        val pkg = NETEASE_PKG
+        val version = packageVersion(pkg)
+        if (version == null) {
+            val web = openUriInBrowser("https://music.163.com/song?id=$id")
+            return@withContext mapOf(
+                "ok" to web,
+                "id" to id,
+                "name" to name,
+                "route" to if (web) "网页版" else "没跳成",
+                "note" to if (web) {
+                    "这台手机没装网易云音乐，已经用浏览器打开网页版了"
+                } else {
+                    "这台手机没装网易云音乐，网页版也没调起来"
+                },
+                "netease" to "没装"
+            )
+        }
 
-    /**
-     * 唤起网易云播这首歌，返回走的是哪条路。
-     * 网易云的 deep link：orpheus://song/<id>/?autoplay=1（带上 autoplay 才会直接播）
-     */
-    private fun openNetEase(id: Long): String? {
+        val steps = mutableListOf<String>()
+        val before = frontPackageNow()
+        val canWatch = PermissionService.current != null || hasUsageAccess()
         val tries = listOf(
             "orpheus://song/$id/?autoplay=1" to "网易云客户端（直接播放）",
             "orpheus://song/$id" to "网易云客户端（歌曲页）",
-            "https://music.163.com/song?id=$id" to "网页版（没装客户端）"
+            "orpheus://play/song/$id" to "网易云客户端（播放页）",
+            "https://music.163.com/song?id=$id" to "网易云（App Links）"
         )
+
         for ((uri, how) in tries) {
-            try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    if (uri.startsWith("orpheus://")) setPackage("com.netease.cloudmusic")
-                }
-                context.startActivity(intent)
-                return how
-            } catch (e: Exception) {
+            if (!hasHandler(uri, pkg)) {
+                steps.add("$how：这个网易云不接这条链接")
+                continue
             }
+            val sent = try {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        setPackage(pkg)
+                    }
+                )
+                true
+            } catch (e: Exception) {
+                steps.add("$how：起不来（${e.javaClass.simpleName}）")
+                false
+            }
+            if (!sent) continue
+
+            if (!canWatch) {
+                steps.add("$how：已经发出去了（没开「使用情况访问」、无障碍也没接上，看不到前台）")
+                return@withContext mapOf(
+                    "ok" to true,
+                    "id" to id, "name" to name,
+                    "route" to how,
+                    "verified" to false,
+                    "note" to "已经用「$how」发出唤起，但这台手机没开「使用情况访问」、无障碍也没接上，感知看不到前台，确认不了它到底有没有真起来",
+                    "netease" to version,
+                    "steps" to steps
+                )
+            }
+
+            val front = waitForeground(pkg, 1400)
+            if (front == pkg) {
+                steps.add("$how：前台已经是网易云")
+                return@withContext mapOf(
+                    "ok" to true,
+                    "id" to id, "name" to name,
+                    "route" to how,
+                    "verified" to true,
+                    "note" to "已经用「$how」打开这首歌了",
+                    "netease" to version,
+                    "steps" to steps
+                )
+            }
+            val shown = front ?: before ?: "没变"
+            steps.add("$how：发出去了，前台还是「$shown」，没到网易云")
         }
-        return null
+
+        mapOf(
+            "ok" to false,
+            "id" to id, "name" to name,
+            "route" to "没跳成",
+            "verified" to true,
+            "note" to "每一条都发出去了，网易云都没到前台。多半是系统把「后台启动」拦了：给感知开「后台弹出界面 / 自启动 / 省电策略无限制」，再把网易云的省电也设成无限制（别让它被冻结）",
+            "netease" to version,
+            "steps" to steps
+        )
+    }
+
+    private companion object {
+        const val NETEASE_PKG = "com.netease.cloudmusic"
+    }
+
+    private fun packageVersion(pkg: String): String? = try {
+        val info = context.packageManager.getPackageInfo(pkg, 0)
+        val code = runCatching { info.longVersionCode }.getOrNull()
+        "v${info.versionName}" + (code?.let { " ($it)" } ?: "")
+    } catch (e: Exception) {
+        null
+    }
+
+    /** 这个包里有没有 Activity 接这条链接（查不了就当能，交给 startActivity 去试） */
+    private fun hasHandler(uri: String, pkg: String): Boolean = try {
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply { setPackage(pkg) }
+        context.packageManager.resolveActivity(i, PackageManager.MATCH_DEFAULT_ONLY) != null
+    } catch (e: Exception) {
+        true
+    }
+
+    private fun openUriInBrowser(uri: String): Boolean = try {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    /** 现在屏幕最前面是谁：先问无障碍（实时），没有就退回「使用情况访问」 */
+    private fun frontPackageNow(): String? {
+        val svc = PermissionService.current
+        if (svc != null) {
+            val pkg = runCatching {
+                val w = svc.windows.firstOrNull { it.isActive && it.isFocused }
+                    ?: svc.windows.firstOrNull { it.isActive }
+                w?.root?.packageName?.toString()
+            }.getOrNull()
+            if (!pkg.isNullOrBlank()) return pkg
+        }
+        if (!hasUsageAccess()) return null
+        return runCatching {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+                ?: return null
+            val end = System.currentTimeMillis()
+            val events = usm.queryEvents(end - 180_000, end)
+            val ev = UsageEvents.Event()
+            var last: String? = null
+            while (events.hasNextEvent()) {
+                events.getNextEvent(ev)
+                if (ev.eventType == UsageEvents.Event.ACTIVITY_RESUMED) last = ev.packageName
+            }
+            last
+        }.getOrNull()
+    }
+
+    /** 等它真的到前台，最多等 maxMs；没等到就把最后看到的前台还回去，方便说清楚卡在哪 */
+    private suspend fun waitForeground(pkg: String, maxMs: Long): String? {
+        val end = System.currentTimeMillis() + maxMs
+        var last: String? = null
+        while (System.currentTimeMillis() < end) {
+            delay(150)
+            val f = frontPackageNow()
+            if (f != null) last = f
+            if (f == pkg) return pkg
+        }
+        return last
+    }
+
+    private fun hasUsageAccess(): Boolean {
+        return try {
+            val ops = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+                ?: return false
+            val uid = android.os.Process.myUid()
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, uid, context.packageName)
+            } else {
+                ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, uid, context.packageName)
+            }
+            mode == AppOpsManager.MODE_ALLOWED
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // ── 自检 ────────────────────────────────────────
+
+    /**
+     * 一次把「能查到的权限」全查一遍。
+     * 有些东西（自启动、后台弹出界面、省电策略）系统根本不给 App 看，那些只能给一句话让人自己去开，
+     * 所以结果里分两块：checks 是真查到的，manual 是查不到、要人自己去看的。
+     */
+    fun healthCheck(): Map<String, Any> {
+        val checks = mutableListOf<Map<String, Any>>()
+        fun add(name: String, ok: Boolean, hint: String) {
+            checks.add(mapOf("name" to name, "ok" to ok, "hint" to hint))
+        }
+
+        add("悬浮窗", canOverlay(), "「显示在其他应用的上层」没开的话，后台启动也会被拦")
+        add("使用情况访问", hasUsageAccess(), "设置 → 特殊应用权限 → 使用情况访问；开了才查得到前台是谁")
+        add("无障碍", PermissionService.current != null, "没开就只能靠使用情况访问看前台")
+        add("通知权限", notificationsAllowed(), "Android 13 起要单独给，不给就弹不出通知")
+        add("通知监听", notifListenerOn(), "读通知要用，没开 read_notifications 是空的")
+        add("勿扰权限", dndAllowed(), "改勿扰/静音要用")
+        add(
+            "电池优化已放行",
+            ignoringBattery(),
+            "没放行的话后台容易被掐，闹钟和服务都不稳"
+        )
+        add(
+            "精确闹钟",
+            canExactAlarm(),
+            "Android 12 起要单独给，不给闹钟会不准"
+        )
+        add("定位", granted(Manifest.permission.ACCESS_FINE_LOCATION), "天气、实时位置要用")
+        add("麦克风", granted(Manifest.permission.RECORD_AUDIO), "录环境音要用")
+        add("相机", granted(Manifest.permission.CAMERA), "")
+
+        val bad = checks.filter { it["ok"] != true }.map { it["name"] as String }
+        val missText = if (bad.isEmpty()) "都开了" else "还有没开的：" + bad.joinToString("、")
+
+        return mapOf(
+            "ok" to true,
+            "device" to "${Build.BRAND} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+            "missing" to missText,
+            "checks" to checks,
+            "manual" to listOf(
+                "自启动 / 后台弹出界面 / 省电策略：系统不给 App 看状态，只能自己去开（小米在「应用管理 → 权限 → 其他权限」，华为在「启动管理」改手动）",
+                "网易云、闹钟这类要拉起来的 App，自己的省电策略也得设成无限制，不然会被冻结"
+            )
+        )
+    }
+
+    private fun granted(perm: String): Boolean =
+        ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED
+
+    private fun notificationsAllowed(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, "android.permission.POST_NOTIFICATIONS") ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun notifListenerOn(): Boolean = try {
+        androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context)
+            .contains(context.packageName)
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun canOverlay(): Boolean = try {
+        android.provider.Settings.canDrawOverlays(context)
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun dndAllowed(): Boolean = try {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+        nm?.isNotificationPolicyAccessGranted ?: false
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun ignoringBattery(): Boolean = try {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        pm?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun canExactAlarm(): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val am = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            am?.canScheduleExactAlarms() ?: false
+        } else {
+            true
+        }
+    } catch (e: Exception) {
+        false
     }
 
     // ── 日程 / 闹钟 ─────────────────────────────────

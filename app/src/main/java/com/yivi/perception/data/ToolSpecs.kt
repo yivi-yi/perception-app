@@ -153,11 +153,15 @@ object Tools {
         ),
         ToolSpec(
             "play_song",
-            "用歌曲 id 在这台手机上唤起网易云播那首歌。注意：只对「网易云音乐」的歌曲 id 有效（别的平台不行），手机没装网易云会退回网页版；id 要先用 search_song 搜出来。",
+            "用歌曲 id 在这台手机上唤起网易云播那首歌。会核对网易云有没有真的到前台，没到就照实说。只对「网易云音乐」的歌曲 id 有效（别的平台不行），手机没装网易云会退回网页版；id 要先用 search_song 搜出来。",
             listOf(
                 ToolParam("id", "integer", "网易云的歌曲 id，来自 search_song", true),
                 ToolParam("name", "string", "歌名，可空，只用来回话时念一下")
             )
+        ),
+        ToolSpec(
+            "check_permissions",
+            "自检：一次把这台手机的权限挨个查一遍，哪些开了哪些没开，没开的顺带说去哪开。手机上有功能不起作用（拉不起别的 App、通知不弹、闹钟不准、读不到前台）时先用它。"
         )
     )
 }

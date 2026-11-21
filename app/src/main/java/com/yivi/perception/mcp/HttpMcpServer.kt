@@ -244,8 +244,10 @@ class HttpMcpServer(private val engine: McpEngine) {
                             (if (sid != null) sseStreams[sid] else null) ?: sseStreams.values.lastOrNull()
                         }
                         when {
-                            request == null ->
+                            request == null -> {
+                                log("POST $path → 400 解析不了 body（TE=${session.headers["transfer-encoding"] ?: "无"} / CL=${session.headers["content-length"] ?: "无"} / 读到 ${raw.length} 字：${raw.take(120).replace("\n", " ")}）")
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
+                            }
 
                             out == null -> {
                                 log("POST $path → 404 没有对应的 SSE 流（session=${sid?.take(8) ?: "无"}）")
@@ -348,9 +350,18 @@ class HttpMcpServer(private val engine: McpEngine) {
                         }
 
                         when {
+                            // 有客户端会先发一个空 body 的 POST 探路（看服务端还在不在）。
+                            // 这种不该当语法错误打回去，202 就够它继续往下走。
+                            raw.isBlank() -> {
+                                log("POST $path → 202 空 body（当探测/通知处理）")
+                                cors(newFixedLengthResponse(Response.Status.ACCEPTED, "text/plain", ""))
+                            }
+
                             // 跟官方一样：Accept 必须两个都要，Content-Type 必须是 json
-                            request == null ->
+                            request == null -> {
+                                log("POST $path → 400 解析不了 body（TE=${session.headers["transfer-encoding"] ?: "无"} / CL=${session.headers["content-length"] ?: "无"} / 读到 ${raw.length} 字：${raw.take(120).replace("\n", " ")}）")
                                 rpcError(Response.Status.BAD_REQUEST, -32700, "parse error")
+                            }
 
                             // 注意：客户端 Accept 里写的就是不带 charset 的媒体类型，别拿响应那套来比。
                             // 两种都不收才拒；只收一种的照常回（规范说该 406，但客户端花样太多）
@@ -474,40 +485,87 @@ class HttpMcpServer(private val engine: McpEngine) {
      * 自己按 UTF-8 读 body。
      * 不能用 session.parseBody()：Content-Type 里没写 charset 时，NanoHTTPD 会按默认的
      * US-ASCII 解码，中文全变问号——「传中文变乱码、写进去读回来是����」就是这个原因。
+     *
+     * 分块（Transfer-Encoding: chunked）也要自己解：NanoHTTPD 不解，直接把 "1a3\r\n{...}\r\n0\r\n\r\n"
+     * 这种带长度前缀的原始数据丢过来，JSON 一解析就是 -32700 parse error —— 客户端明明发了请求，
+     * 服务端却说格式不对。有些 Android 客户端（OkHttp 发不知道长度的 body）就爱这么发。
      */
     private fun readBody(session: IHTTPSession): String = try {
-        val len = session.headers["content-length"]?.trim()?.toIntOrNull() ?: -1
         val stream = session.inputStream ?: return ""
-        val bytes = if (len > 0) {
-            val buf = ByteArray(len)
-            var read = 0
-            while (read < len) {
-                val n = stream.read(buf, read, len - read)
-                if (n <= 0) break
-                read += n
-            }
-            buf.copyOf(read)
-        } else {
-            // 没给 Content-Length 的（分块上传一类）不能读到底：这个连接是 keep-alive，
-            // 读到底就是永远读不完，客户端等不到响应报 timeout，日志里还一条都不留。
-            // 给它 1.5 秒，读到多少算多少。
-            val out = java.io.ByteArrayOutputStream()
-            val tmp = ByteArray(4096)
-            val deadline = System.currentTimeMillis() + 1500
-            while (System.currentTimeMillis() < deadline) {
-                val avail = runCatching { stream.available() }.getOrDefault(0)
-                if (avail <= 0) {
-                    Thread.sleep(20)
-                    continue
+        val te = session.headers["transfer-encoding"]?.lowercase() ?: ""
+        val len = session.headers["content-length"]?.trim()?.toIntOrNull() ?: -1
+        val bytes = when {
+            te.contains("chunked") -> readChunked(stream)
+
+            len > 0 -> {
+                val buf = ByteArray(len)
+                var read = 0
+                while (read < len) {
+                    val n = stream.read(buf, read, len - read)
+                    if (n <= 0) break
+                    read += n
                 }
-                val n = stream.read(tmp, 0, minOf(tmp.size, avail))
-                if (n <= 0) break
-                out.write(tmp, 0, n)
+                buf.copyOf(read)
             }
-            out.toByteArray()
+
+            else -> {
+                // 没给 Content-Length 的（分块上传一类）不能读到底：这个连接是 keep-alive，
+                // 读到底就是永远读不完，客户端等不到响应报 timeout，日志里还一条都不留。
+                // 给它 1.5 秒，读到多少算多少。
+                val out = java.io.ByteArrayOutputStream()
+                val tmp = ByteArray(4096)
+                val deadline = System.currentTimeMillis() + 1500
+                while (System.currentTimeMillis() < deadline) {
+                    val avail = runCatching { stream.available() }.getOrDefault(0)
+                    if (avail <= 0) {
+                        Thread.sleep(20)
+                        continue
+                    }
+                    val n = stream.read(tmp, 0, minOf(tmp.size, avail))
+                    if (n <= 0) break
+                    out.write(tmp, 0, n)
+                }
+                out.toByteArray()
+            }
         }
         String(bytes, Charsets.UTF_8)
     } catch (e: Exception) {
         ""
+    }
+
+    /** 解 Transfer-Encoding: chunked 的体；格式不对就尽力返回读到的部分 */
+    private fun readChunked(input: java.io.InputStream): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val deadline = System.currentTimeMillis() + 6000
+
+        fun readLine(): String {
+            val sb = StringBuilder()
+            while (System.currentTimeMillis() < deadline) {
+                val b = input.read()
+                if (b < 0) break
+                if (b == '\n'.code) break
+                if (b != '\r'.code) sb.append(b.toChar())
+            }
+            return sb.toString()
+        }
+
+        while (System.currentTimeMillis() < deadline) {
+            val line = readLine().trim()
+            if (line.isEmpty()) continue
+            // 分块长度后面可能带 extension： "1a3;foo=bar"
+            val size = line.substringBefore(';').trim().toIntOrNull(16) ?: break
+            if (size <= 0) break
+            val buf = ByteArray(size)
+            var read = 0
+            while (read < size) {
+                val n = input.read(buf, read, size - read)
+                if (n <= 0) break
+                read += n
+            }
+            if (read > 0) out.write(buf, 0, read)
+            if (read < size) break
+            readLine() // 每块后面那个 CRLF
+        }
+        return out.toByteArray()
     }
 }

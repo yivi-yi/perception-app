@@ -364,6 +364,21 @@ class HttpMcpServer(private val engine: McpEngine) {
                             log("POST $path → 会话头${if (sessionHeader == null) "没带" else "对不上（${sessionHeader.take(8)}）"}，照常处理")
                         }
 
+                        // Chatbox 这类新客户端（@modelcontextprotocol/client）在连接前会先发一条
+                        // server/discover 探一下这是哪一代协议。我们只讲 2025 那套 initialize 握手，
+                        // 这里明确回 501，它就会退回 initialize 再来一遍。
+                        // 千万别回 200：200 但内容它用不上，它会当成「协商失败」直接把错误甩给用户，
+                        // 界面上一句 "Error POSTing to endpoint" 就到这儿为止了。
+                        if (request != null && request["method"]?.jsonPrimitive?.contentOrNull == "server/discover") {
+                            log("POST $path → 501 收到 server/discover（新协议探针），明确回不支持，让它走 initialize")
+                            return cors(
+                                newFixedLengthResponse(
+                                    Response.Status.NOT_IMPLEMENTED, "application/json; charset=utf-8",
+                                    """{"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"server/discover not supported here; this server speaks the 2025 initialize handshake"}}"""
+                                )
+                            )
+                        }
+
                         when {
                             // 有客户端会先发一个空 body 的 POST 探路（看服务端还在不在）。
                             // 这种不该当语法错误打回去，202 就够它继续往下走。
@@ -391,8 +406,10 @@ class HttpMcpServer(private val engine: McpEngine) {
                             }
 
                             protocolHeader != null && protocolHeader !in supportedVersions -> {
-                                log("POST $path → 400 协议版本不认（$protocolHeader）")
-                                rpcError(Response.Status.BAD_REQUEST, -32600, "Unsupported protocol version: $protocolHeader")
+                                // 新客户端会先报 2026-07-28 这种版本号来探路，认不认识都不该拦：
+                                // 拦了它连 initialize 都不发，用户只看到一句莫名其妙的错。记一笔就放行。
+                                log("POST $path → 版本头 $protocolHeader 不在认识的范围里，照常按 2025 那套处理")
+                                false
                             }
 
                             engine.needsNoBody(request) -> {
